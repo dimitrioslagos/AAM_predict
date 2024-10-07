@@ -49,7 +49,7 @@ with tabs[0]:
     else:
         st.write("Please upload a file to see the content.")
 
-with tab[1]:
+with tabs[1]:
     st.header("Real Time Alarms")
     st.subheader("Bushings")
     
