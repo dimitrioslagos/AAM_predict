@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import math
 from pathlib import Path
-from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_DGA,display_light,generate_training_data_oil,prepare_model_top_oil
+from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_DGA,display_light,generate_training_data_oil,prepare_model_top_oil, predict_top_oil
 
 
 # Set the title of the Streamlit app
@@ -58,11 +58,16 @@ with tabs[0]:
         st.write('Oil Temperature Prediction Model trained')
         st.session_state['model_oil'] = model_oil
         st.session_state['oil_threshold'] = oil_threshold
+        #Only for GA presentation
+        st.session_state['X'] = X
+        st.session_state['Y'] = Y
     else:
         st.write('Oil Temperature Prediction Model trained')
         oil_threshold = st.session_state.get('oil_threshold', None)
         model_oil = st.session_state.get('model_oil', None)
-        st.write(oil_threshold)
+        #Only for GA presentation
+        X = st.session_state.get('X', None)
+        Y = st.session_state.get('Y', None)
 
 with tabs[1]:
     st.header("Real Time Alarms")
@@ -97,6 +102,13 @@ with tabs[1]:
                 st.write("Gas levels critical. Maintenance actions suggested") 
             st.write("DGA Results")
             st.write(DGA)
-
-
+    with col3:
+        st.subheader("Oil Anomaly Detection")
+        if ('model_oil' in st.session_state):
+            t = pd.to_datetime('2024-08-01')
+            Xtest = X[(X.index >= (t - pd.Timedelta(days=1))) & (X.index <= t)]
+            Ytest = Y[(Y.index >= (t - pd.Timedelta(days=1))) & (Y.index <= t)]
+            Flags,Error = predict_top_oil(X_test,y_test,model,threshold)
+            st.write(Flags)
+            st.write(Threshold)
     
