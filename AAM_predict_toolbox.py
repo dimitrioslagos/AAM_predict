@@ -13,9 +13,8 @@ maxV =  pd.Series(maxV)
 
 #Function to generate error plot
 def html_error_plot(error,threshold):
-    error.rename(columns={0: 'value'})
     # Create a Plotly figure (time series plot)
-    fig = px.line(error, x=error.index, y='value', title='Time Series Plot', labels={'x': 'Time', 'y': 'Error (C)'})
+    fig = px.line(error, x=error.index, y=error.values, title='Time Series Plot', labels={'x': 'Time', 'y': 'Error (C)'})
     fig = px.add_scatter(x=error.index, y=threshold*error['value']/error['value'], mode='lines', name='Real', line=dict(color='black'))
     return fig.to_html()
     
