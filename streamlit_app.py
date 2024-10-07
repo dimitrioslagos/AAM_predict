@@ -29,7 +29,6 @@ with tabs[0]:
                 OLMS_DATA = pd.read_csv(uploaded_file,delimiter=';')
                 st.session_state['uploaded_file'] = uploaded_file.name
                 st.write("File content as DataFrame:")
-                st.write(OLMS_DATA )
 
                 #Prepare Data
                 id1 = OLMS_DATA.Timestamp.str.contains('EET')
@@ -40,6 +39,7 @@ with tabs[0]:
                 OLMS_DATA.index = T
                 OLMS_DATA.drop(OLMS_DATA.index[OLMS_DATA.Logs=='SENSOR ERROR 1'],inplace=True)
                 OLMS_DATA.drop(columns=['Logs'],inplace=True)
+                st.write(OLMS_DATA )
                 st.session_state['OLMS_DATA'] = OLMS_DATA
             else:
                 st.write("File is not csv")
