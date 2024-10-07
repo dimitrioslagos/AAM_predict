@@ -108,8 +108,12 @@ with tabs[1]:
             t = pd.to_datetime('2024-08-01')
             Xtest = X[(X.index >= (t - pd.Timedelta(days=1))) & (X.index <= t)]
             Ytest = Y[(Y.index >= (t - pd.Timedelta(days=1))) & (Y.index <= t)]
-            st.write(Xtest)
             Flags,Error = predict_top_oil(Xtest,Ytest,model_oil,oil_threshold)
-            st.write(Flags)
+            st.markdown(display_light(not((Flags==True).any())), unsafe_allow_html=True)
+            if not((Flags==True).any()):
+                st.write("No anomalies detected in oil temperature")
+            else:
+                st.write("Anomalies detected in oil temperature")
+            st.write(not((Flags==True).any()))
             st.write(Error)
     
