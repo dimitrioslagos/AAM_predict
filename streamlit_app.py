@@ -111,5 +111,5 @@ with tabs[1]:
             st.write(Xtest)
             Flags,Error = predict_top_oil(Xtest,Ytest,model_oil,oil_threshold)
             st.write(Flags)
-            st.write(Threshold)
+            st.write(Error)
     
