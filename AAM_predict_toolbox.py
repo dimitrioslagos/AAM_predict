@@ -7,15 +7,28 @@ import tf_keras
 from tf_keras import layers
 import plotly.express as px
 import os
+import plotly.graph_objects as go
 
 maxV = {'Top Oil Temperature':70,'Ambient Temperature':50,'Ambient Shade Temperature':50,'HV Current':300}
 maxV =  pd.Series(maxV)
 
 #Function to generate error plot
 def html_error_plot(error,threshold):
-    # Create a Plotly figure (time series plot)
-    fig = px.line(error, x=error.index, y=error.values, title='Time Series Plot', labels={'x': 'Time', 'y': 'Error (C)'})
-    fig = px.add_scatter(x=error.index, y=threshold*error['value']/error['value'], mode='lines', name='Real', line=dict(color='black'))
+    # Create Plotly figure
+    fig = go.Figure()
+
+    # Add the first line (assuming first column in df)
+    fig.add_trace(go.Scatter(x=error.index, y=error[error.columns[0]], mode='lines', name='Error (C)'))
+
+    # Add the second line (assuming second column in df)
+    fig.add_trace(go.Scatter(x=error.index, y=threshold*error[error.columns[0]]/error[error.columns[0]], mode='lines', name='Treshold'))
+
+    # Customize the layout (optional)
+    fig.update_layout(title="Oil Temperature Model Error",
+                      xaxis_title="Time",
+                      yaxis_title="Error (C)",
+                      template="plotly_white")
+    
     return fig.to_html()
     
 
