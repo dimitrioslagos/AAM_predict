@@ -278,7 +278,7 @@ def compute_warning_on_bushing(t,DATA):
     abs_change = 100*(mean-value).abs()/mean
     warning = abs_change>=10
     Message = pd.DataFrame(columns=warning.index)
-    Message[warning]='Warning'
-    Message[not(warning)]='OK'
+    Message.loc[0,Message.columns[warning]] = 'Warning'
+    Message.loc[0,Message.columns[warning==False]] = 'OK'
     return Message
 
