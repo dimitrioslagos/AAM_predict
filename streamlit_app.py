@@ -51,7 +51,7 @@ with tabs[0]:
 
 with tabs[1]:
     st.header("Real Time Alarms")
-    col1, col2, col3 = st.columns([5,5,5])
+    col1, col2, col3 = st.columns([20,20,20])
     with col1:
         st.subheader("Bushings")
         if 'OLMS_DATA'  in st.session_state:
