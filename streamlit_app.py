@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import math
 from pathlib import Path
-from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_DGA,display_light
+from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_DGA,display_light,generate_training_data_oil
 
 
 # Set the title of the Streamlit app
@@ -41,11 +41,16 @@ with tabs[0]:
                 OLMS_DATA.drop(columns=['Logs'],inplace=True)
                 st.write(OLMS_DATA )
                 st.session_state['OLMS_DATA'] = OLMS_DATA
+                ##train Oil temperature prediction model
+                X, Y = generate_training_data_oil(ATF3)
+                model_oil = prepare_model_top_oil(X,Y)
+                st.session_state['model_oil'] = model_oil
             else:
                 st.write("File is not csv")
         else:
             # If file is already uploaded, display the previous result from session state
             OLMS_DATA = st.session_state.get('OLMS_DATA', None)
+            model_oil = st.session_state.get('model_oil', None)
     else:
         st.write("Please upload a file to see the content.")
 
