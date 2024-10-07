@@ -18,10 +18,10 @@ def html_error_plot(error,threshold):
     fig = go.Figure()
 
     # Add the first line (assuming first column in df)
-    fig.add_trace(go.Scatter(x=error.index, y=error[error.columns[0]], mode='lines', name='Error (C)'))
+    fig.add_trace(go.Scatter(x=error.index, y=error.values, mode='lines', name='Error (C)'))
 
     # Add the second line (assuming second column in df)
-    fig.add_trace(go.Scatter(x=error.index, y=threshold*error[error.columns[0]]/error[error.columns[0]], mode='lines', name='Treshold'))
+    fig.add_trace(go.Scatter(x=error.index, y=threshold*error.values/error.values, mode='lines', name='Treshold'))
 
     # Customize the layout (optional)
     fig.update_layout(title="Oil Temperature Model Error",
