@@ -9,7 +9,7 @@ from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_D
 st.title("Short Term Asset Management")
 
 # Define the tabs
-tabs = st.tabs(["Historical Data Input","Alarms","Lights"])
+tabs = st.tabs(["Historical Data Input","Alarms"])
 
 # Content for the 'Home' tab
 with tabs[0]:
@@ -51,46 +51,37 @@ with tabs[0]:
 
 with tabs[1]:
     st.header("Real Time Alarms")
-    st.subheader("Bushings")
-    if 'OLMS_DATA'  in st.session_state:
-        Alarms = compute_warning_on_bushing(pd.to_datetime('2024-08-01'),OLMS_DATA)
-        if Alarms.empty:
-            st.write("No warnings on the Bushings. Bushing status ok")
-            st.write(Alarms)
-        else:
-            st.write("Warnings on the Bushings")
-        st.write(Alarms)
-    st.subheader("Dissolved Gas Analysis")
-    if 'OLMS_DATA'  in st.session_state:
-        DGA = compute_warning_on_DGA(pd.to_datetime('2024-08-01'),OLMS_DATA)
-        if (DGA['SCORE']<=3).any():
-            DGA['SCORE'] = 'ok'
-            st.write("Status ok. No action suggested based on DGA data")
-        elif (3 < DGA['SCORE']).any() & (DGA['SCORE']<=5).any():
-            DGA['SCORE'] = 'minor warning'
-            st.write("Gas levels considerable but within limits. Increase monitoring")
-        elif (5 < DGA['SCORE']).any() & (DGA['SCORE']<=7).any():
-            DGA['SCORE'] = 'warning'
-            st.write("Gas levels considerable. Maintenance actions suggested")
-        else:
-            DGA['SCORE'] = 'critical'
-            st.write("Gas levels critical. Maintenance actions suggested") 
-        st.write("DGA Results")
-        st.write(DGA)
-
-with tabs[2]:
-    # Create columns to display the lights next to each other
     col1, col2, col3 = st.columns(3)
-    # Display lights in each column
-with col1:
-    st.write("Bushings")
-    st.markdown(display_light(Alarms.empty), unsafe_allow_html=True)
+    with col1:
+        st.subheader("Bushings")
+        if 'OLMS_DATA'  in st.session_state:
+            Alarms = compute_warning_on_bushing(pd.to_datetime('2024-08-01'),OLMS_DATA)
+            st.markdown(display_light(Alarms.empty), unsafe_allow_html=True)
+            if Alarms.empty:
+                st.write("No warnings on the Bushings. Bushing status ok")
+                st.write(Alarms)
+            else:
+                st.write("Warnings on the Bushings")
+            st.write(Alarms)
+    with col2:
+        st.subheader("Dissolved Gas Analysis")
+        if 'OLMS_DATA'  in st.session_state:
+            DGA = compute_warning_on_DGA(pd.to_datetime('2024-08-01'),OLMS_DATA)
+            st.markdown(display_light((DGA['SCORE']<=3).any()), unsafe_allow_html=True)
+            if (DGA['SCORE']<=3).any():
+                DGA['SCORE'] = 'ok'
+                st.write("Status ok. No action suggested based on DGA data")
+            elif (3 < DGA['SCORE']).any() & (DGA['SCORE']<=5).any():
+                DGA['SCORE'] = 'minor warning'
+                st.write("Gas levels considerable but within limits. Increase monitoring")
+            elif (5 < DGA['SCORE']).any() & (DGA['SCORE']<=7).any():
+                DGA['SCORE'] = 'warning'
+                st.write("Gas levels considerable. Maintenance actions suggested")
+            else:
+                DGA['SCORE'] = 'critical'
+                st.write("Gas levels critical. Maintenance actions suggested") 
+            st.write("DGA Results")
+            st.write(DGA)
 
-with col2:
-    st.write("DGA")
-    st.markdown(display_light((DGA['SCORE']<=3).any()), unsafe_allow_html=True)
 
-with col3:
-    st.write("Boolean Value 3")
-    st.markdown(display_light((DGA['SCORE']<=3).any()), unsafe_allow_html=True)
     
