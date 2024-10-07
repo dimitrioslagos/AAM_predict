@@ -59,6 +59,7 @@ with tabs[0]:
     else:
         oil_threshold = st.session_state.get('oil_threshold', None)
         model_oil = st.session_state.get('model_oil', None)
+        st.write(oil_threshold)
 
 with tabs[1]:
     st.header("Real Time Alarms")
