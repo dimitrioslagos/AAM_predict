@@ -48,7 +48,7 @@ def train_model_top_oil(X_train,y_train):
 def prepare_model_top_oil(X,Y):
     # Specify the directory path
     model = train_model_top_oil(X, Y)
-    maxX = maxV[X_test.columns]
+    maxX = maxV[X.columns]
     ypred = model.predict(X / maxX.values)*maxX['Top Oil Temperature']
     mean_error = (Y - ypred.reshape(ypred.shape[0])).mean()
     std_error = (Y - ypred.reshape(ypred.shape[0])).std()
