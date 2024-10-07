@@ -270,6 +270,7 @@ def compute_warning_on_bushing(t,DATA):
                     'tand Y3':'BUSHING Y3 Tan delta'}
     for col in Bushings.columns:
         Bushings[col] = DATA.loc[DATA.Measurement == Bushings_mapping[col], 'Value'].resample('0.5h').mean()
+    print(Bushings)
 
     Bushings_last = Bushings[(Bushings.index>=(t-pd.Timedelta(days=7)))&(Bushings.index<=t)]
     value = Bushings_last[-6:].mean()
