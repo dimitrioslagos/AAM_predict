@@ -63,11 +63,11 @@ with tabs[1]:
     st.subheader("Dissolved Gas Analysis")
     if 'OLMS_DATA'  in st.session_state:
         DGA = compute_warning_on_DGA(pd.to_datetime('2024-08-01'),OLMS_DATA)
-        if DGA['Score'] <= 3:
+        if DGA['SCORE'] <= 3:
             st.write("Status ok. No action suggested based on DGA data")
-        elif 3 < c2h6_value <= 5:
+        elif 3 < DGA['SCORE'] <= 5:
             st.write("Gas levels considerable but within limits. Increase monitoring")
-        elif 5 < c2h6_value <= 7:
+        elif 5 < DGA['SCORE'] <= 7:
             st.write("Gas levels considerable. Maintenance actions suggested")
         else:
             st.write("Gas levels critical. Maintenance actions suggested") 
