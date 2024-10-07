@@ -47,15 +47,18 @@ with tabs[0]:
         else:
             # If file is already uploaded, display the previous result from session state
             OLMS_DATA = st.session_state.get('OLMS_DATA', None)
-            model_oil = st.session_state.get('model_oil', None)
     else:
         st.write("Please upload a file to see the content.")
     
     ##train Oil temperature prediction model
     if ('OLMS_DATA'  in st.session_state)&('model_oil' not in st.session_state):  
         X, Y = generate_training_data_oil(OLMS_DATA)
-        model_oil = prepare_model_top_oil(X,Y)
+        model_oil,oil_threshold = prepare_model_top_oil(X,Y)
         st.session_state['model_oil'] = model_oil
+        st.session_state['oil_threshold'] = oil_threshold
+    else:
+        oil_threshold = st.session_state.get('oil_threshold', None)
+        model_oil = st.session_state.get('model_oil', None)
 
 with tabs[1]:
     st.header("Real Time Alarms")
