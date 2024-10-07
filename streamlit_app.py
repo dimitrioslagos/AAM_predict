@@ -59,7 +59,6 @@ with tabs[1]:
             st.markdown(display_light(Alarms.empty), unsafe_allow_html=True)
             if not((Alarms.loc['Status'] == 'Warning').any()):
                 st.write("No warnings on the Bushings. Bushing status ok")
-                st.write(Alarms)
             else:
                 st.write("Warnings on the Bushings")
             st.write("Bushings condition:")
