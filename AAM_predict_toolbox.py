@@ -283,3 +283,17 @@ def compute_warning_on_bushing(t,DATA):
     Message.index = ['Status']
     return Message
 
+def compute_warning_on_DGA(t,DATA):
+    DGA = prepare_DGA_df(DATA)
+    DGA_last = DGA[(DGA.index >= (t - pd.Timedelta(days=1))) & (DGA.index <= t)]
+    DGA_last['C2H2_State'] = DGA_last['C2H2'].apply(compute_acetylene_condition_state)
+    DGA_last['C2H6_State'] = DGA_last['C2H6'].apply(compute_ethane_condition_state)
+    DGA_last['C2H4_State'] = DGA_last['C2H4'].apply(compute_ethylene_condition_state)
+    DGA_last['CH4_State'] = DGA_last['CH4'].apply(compute_methane_condition_state)
+    DGA_last['H2_State'] = DGA_last['H2'].apply(compute_hydrogen_condition_state)
+    DGA_last = DGA_last.mean()
+    DGA_last['SCORE'] = 50*DGA_last['H2_State']+30*(DGA_last['CH4_State']+DGA_last['C2H4_State']+DGA_last['C2H6_State'])+120*DGA_last['C2H2_State']
+    DGA_last.drop(index = ['C2H2_State','C2H6_State','C2H4_State','CH4_State','H2_State'],inplace=True)
+    DGA = pd.DataFrame(index=['status'],columns=DGA_last.index)
+    DGA.loc['status',:]=DGA_last.values.transpose()
+    return DGA
