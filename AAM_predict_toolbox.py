@@ -28,8 +28,6 @@ def html_error_plot(error,threshold):
 
     # Customize the layout (optional)
     fig.update_layout(title="Oil Temperature Model Error (°C)",
-                      xaxis_title="Time",
-                      yaxis_title="Error (C)",
                       showlegend=False,
                       template="plotly_white")
     
