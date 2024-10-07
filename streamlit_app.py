@@ -9,7 +9,7 @@ from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_D
 st.title("Short Term Asset Management")
 
 # Define the tabs
-tabs = st.tabs(["Historical Data Input","Alarms"])
+tabs = st.tabs(["Historical Data Input","Alarms","Lights"])
 
 # Content for the 'Home' tab
 with tabs[0]:
@@ -78,5 +78,19 @@ with tabs[1]:
         st.write("DGA Results")
         st.write(DGA)
 
-            
+with tabs[2]:
+    # Create columns to display the lights next to each other
+    col1, col2, col3 = st.columns(3)
+    # Display lights in each column
+with col1:
+    st.write("Bushings")
+    st.markdown(display_light(Alarms.empty), unsafe_allow_html=True)
+
+with col2:
+    st.write("DGA")
+    st.markdown(display_light((DGA['SCORE']<=3).any()), unsafe_allow_html=True)
+
+with col3:
+    st.write("Boolean Value 3")
+    st.markdown(display_light((DGA['SCORE']<=3).any()), unsafe_allow_html=True)
     
