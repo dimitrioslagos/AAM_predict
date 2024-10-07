@@ -62,12 +62,13 @@ with tabs[1]:
                 st.write(Alarms)
             else:
                 st.write("Warnings on the Bushings")
+            st.write("Bushings condition:")
             st.write(Alarms)
     with col2:
         st.subheader("Dissolved Gas Analysis")
         if 'OLMS_DATA'  in st.session_state:
             DGA = compute_warning_on_DGA(pd.to_datetime('2024-08-01'),OLMS_DATA)
-            st.markdown(display_light((DGA['SCORE']<=3).any()), unsafe_allow_html=True)
+            st.markdown(display_light(not((DGA['SCORE']<=3).any())), unsafe_allow_html=True)
             if (DGA['SCORE']<=3).any():
                 DGA['SCORE'] = 'ok'
                 st.write("Status ok. No action suggested based on DGA data")
