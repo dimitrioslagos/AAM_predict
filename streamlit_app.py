@@ -2,7 +2,8 @@ import streamlit as st
 import pandas as pd
 import math
 from pathlib import Path
-from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_DGA,display_light,generate_training_data_oil,prepare_model_top_oil, predict_top_oil
+from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_DGA,display_light,generate_training_data_oil,prepare_model_top_oil, predict_top_oil, html_error_plot
+
 
 
 # Set the title of the Streamlit app
@@ -115,4 +116,5 @@ with tabs[1]:
             else:
                 st.write("Anomalies detected in oil temperature")
             st.write(Error)
+            st.components.v1.html(html_error_plot(Error,oil_threshold), height=500)
     
