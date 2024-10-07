@@ -11,6 +11,16 @@ import os
 maxV = {'Top Oil Temperature':70,'Ambient Temperature':50,'Ambient Shade Temperature':50,'HV Current':300}
 maxV =  pd.Series(maxV)
 
+#Function to generate error plot
+def html_error_plot(error,threshold):
+    error.columns = ['value']
+    # Create a Plotly figure (time series plot)
+    fig = px.line(error, x=error.index, y='value', title='Time Series Plot', labels={'x': 'Time', 'y': 'Error (C)'})
+    fig = px.add_scatter(x=error.index, y=threshold*error['value']/error['value'], mode='lines', name='Real', line=dict(color='black'))
+    return fig.to_html()
+    
+
+
 
 # Function to display light based on boolean value
 def display_light(value):
