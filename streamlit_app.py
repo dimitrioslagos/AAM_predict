@@ -106,6 +106,7 @@ with tabs[1]:
         st.subheader("Oil Anomaly Detection")
         if ('model_oil' in st.session_state):
             t = pd.to_datetime('2024-08-01')
+            st.write(X)
             Xtest = X[(X.index >= (t - pd.Timedelta(days=1))) & (X.index <= t)]
             Ytest = Y[(Y.index >= (t - pd.Timedelta(days=1))) & (Y.index <= t)]
             Flags,Error = predict_top_oil(X_test,y_test,model,threshold)
