@@ -29,7 +29,7 @@ with tabs[0]:
                 OLMS_DATA = pd.read_csv(uploaded_file)
                 st.session_state['uploaded_file'] = uploaded_file.name
                 st.write("File content as DataFrame:")
-                st.write(df)
+                st.write(OLMS_DATA )
 
                 #Prepare Data
                 id1 = OLMS_DATA.Timestamp.str.contains('EET')
