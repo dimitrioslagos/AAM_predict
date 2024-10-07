@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import math
 from pathlib import Path
-from AAM_predict_toolbox import compute_warning_on_bushing
+from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_DGA
 
 
 # Set the title of the Streamlit app
@@ -62,7 +62,7 @@ with tabs[1]:
         st.write(Alarms)
     st.subheader("Dissolved Gas Analysis")
     if 'OLMS_DATA'  in st.session_state:
-        DGA = ccompute_warning_on_DGA(pd.to_datetime('2024-08-01'),OLMS_DATA)
+        DGA = compute_warning_on_DGA(pd.to_datetime('2024-08-01'),OLMS_DATA)
         if DGA['Score'] <= 3:
             st.write("Status ok. No action suggested based on DGA data")
         elif 3 < c2h6_value <= 5:
