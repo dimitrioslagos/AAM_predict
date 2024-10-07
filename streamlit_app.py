@@ -2,14 +2,14 @@ import streamlit as st
 import pandas as pd
 import math
 from pathlib import Path
-
+from AAM_predict_toolbox import compute_warning_on_bushing
 
 
 # Set the title of the Streamlit app
 st.title("Short Term Asset Management")
 
 # Define the tabs
-tabs = st.tabs(["Historical Data Input"])
+tabs = st.tabs(["Historical Data Input","Alarms"])
 
 # Content for the 'Home' tab
 with tabs[0]:
@@ -48,3 +48,8 @@ with tabs[0]:
             OLMS_DATA = st.session_state.get('OLMS_DATA', None)
     else:
         st.write("Please upload a file to see the content.")
+
+with tab[1]:
+    st.header("Real Time Alarms")
+    st.subheader("Bushings")
+    
