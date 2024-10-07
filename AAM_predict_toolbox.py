@@ -76,8 +76,8 @@ def predict_top_oil(X_test,y_test,model,threshold):
     DATA = pd.DataFrame(columns=['Real','Estimate'])
     DATA['Real'] = y_test
     DATA['Estimate'] = ypred
-    Flags, error = anomaly_detection_in_oil_temp(ypred,y_test,threshold)
-    return Flags, error
+    issues, errors = anomaly_detection_in_oil_temp(ypred,y_test,threshold)
+    return issues, errors
 
 def predict_T_bushing(model,X_test,y_test):
     maxX = pd.Series([50,50,50,288,50,50,288],index=X_test.columns)
