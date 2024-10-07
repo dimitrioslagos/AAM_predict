@@ -60,6 +60,19 @@ with tabs[1]:
         else:
             st.write("Warnings on the Bushings")
         st.write(Alarms)
-            
+    st.subheader("Dissolved Gas Analysis")
+    if 'OLMS_DATA'  in st.session_state:
+        DGA = ccompute_warning_on_DGA(pd.to_datetime('2024-08-01'),OLMS_DATA)
+        if DGA['Score'] <= 3:
+            return st.write("Status ok. No action suggested based on DGA data")
+        elif 3 < c2h6_value <= 5:
+            return st.write("Gas levels considerable but within limits. Increase monitoring")
+        elif 5 < c2h6_value <= 7:
+            return st.write("Gas levels considerable. Maintenance actions suggested")
+        else:
+            return st.write("Gas levels critical. Maintenance actions suggested") 
+        st.write("DGA Results")
+        st.write(DGA)
+
             
     
