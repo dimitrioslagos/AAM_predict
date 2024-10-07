@@ -27,7 +27,7 @@ def html_error_plot(error,threshold):
     fig.add_trace(go.Scatter(x=error.index, y=-threshold*error.values/error.values, mode='lines', name='Treshold'))
 
     # Customize the layout (optional)
-    fig.update_layout(title="Oil Temperature Model Error",
+    fig.update_layout(title="Oil Temperature Model Error (°C)",
                       xaxis_title="Time",
                       yaxis_title="Error (C)",
                       showlegend=False,
