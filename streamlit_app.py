@@ -26,7 +26,7 @@ with tabs[0]:
 
             # Read the CSV file and generate curves
             if uploaded_file.name.endswith("csv"):
-                OLMS_DATA = pd.read_csv(uploaded_file)
+                OLMS_DATA = pd.read_csv(uploaded_file,delimiter=';')
                 st.session_state['uploaded_file'] = uploaded_file.name
                 st.write("File content as DataFrame:")
                 st.write(OLMS_DATA )
