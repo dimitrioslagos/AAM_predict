@@ -59,6 +59,7 @@ with tabs[0]:
         st.session_state['model_oil'] = model_oil
         st.session_state['oil_threshold'] = oil_threshold
     else:
+        st.write('Oil Temperature Prediction Model trained')
         oil_threshold = st.session_state.get('oil_threshold', None)
         model_oil = st.session_state.get('model_oil', None)
         st.write(oil_threshold)
