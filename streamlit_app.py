@@ -37,9 +37,9 @@ with tabs[0]:
                 T1 = pd.to_datetime(OLMS_DATA.loc[id1,'Timestamp'], format='%m/%d/%y, %H:%M:%S EET')
                 T2 = pd.to_datetime(OLMS_DATA.loc[id2,'Timestamp'], format='%m/%d/%y, %H:%M:%S EEST')
                 T = pd.concat((T1,T2))
-                ATF3.index = T
-                ATF3.drop(OLMS_DATA.index[OLMS_DATA.Logs=='SENSOR ERROR 1'],inplace=True)
-                ATF3.drop(columns=['Logs'],inplace=True)
+                OLMS_DATA.index = T
+                OLMS_DATA.drop(OLMS_DATA.index[OLMS_DATA.Logs=='SENSOR ERROR 1'],inplace=True)
+                OLMS_DATA.drop(columns=['Logs'],inplace=True)
                 st.session_state['OLMS_DATA'] = OLMS_DATA
             else:
                 st.write("File is not csv")
