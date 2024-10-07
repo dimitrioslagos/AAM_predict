@@ -115,6 +115,6 @@ with tabs[1]:
                 st.write("No anomalies detected in oil temperature")
             else:
                 st.write("Anomalies detected in oil temperature")
-            st.write(Error)
+            st.write('Model Output past 24 hours')
             st.components.v1.html(html_error_plot(Error,oil_threshold), height=500)
     
