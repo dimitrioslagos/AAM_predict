@@ -57,7 +57,7 @@ with tabs[1]:
         if 'OLMS_DATA'  in st.session_state:
             Alarms = compute_warning_on_bushing(pd.to_datetime('2024-08-01'),OLMS_DATA)
             st.markdown(display_light(Alarms.empty), unsafe_allow_html=True)
-            if (Alarms.loc['status'] == 'Warning').any():
+            if (Alarms.loc['Status'] == 'Warning').any():
                 st.write("No warnings on the Bushings. Bushing status ok")
                 st.write(Alarms)
             else:
