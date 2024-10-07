@@ -42,20 +42,18 @@ def train_model_top_oil(X_train,y_train):
     model.compile(optimizer='adam', loss=loss_mse)
     # Train the model
     history = model.fit(X_train / maxX, y_train / maxX['Top Oil Temperature'], epochs=30, verbose=0)
-    model.save('Models/Top_Oil')
-    return 0
+    #model.save('Models/Top_Oil')
+    return model
 
 def prepare_model_top_oil(X,Y):
     # Specify the directory path
-    directory = "Models/Top_Oil"
-    # Check if the directory exists
-    if os.path.isdir(directory):
-        print("Model exists")
-        return 0
-    else:
-        print("Directory does not exist")
-        train_model_top_oil(X, Y)
-        return 0
+    model = train_model_top_oil(X, Y)
+    maxX = maxV[X_test.columns]
+    ypred = model.predict(X / maxX.values)*maxX['Top Oil Temperature']
+    mean_error = (Y - ypred.reshape(ypred.shape[0])).mean()
+    std_error = (Y - ypred.reshape(ypred.shape[0])).std()
+    threshold  = mean_error+3*std_error
+    return model, threshold
 
 
 
@@ -71,8 +69,8 @@ def train_model_bushing_temp_H(X_train,y_train):
     model.save('Models/Bushing_H')
     return model
 
-def predict_top_oil(X_test,y_test):
-    model = tf_keras.models.load_model('Models/Top_Oil',custom_objects={'loss_mse':  loss_mse})
+def predict_top_oil(X_test,y_test,model):
+    #model = tf_keras.models.load_model('Models/Top_Oil',custom_objects={'loss_mse':  loss_mse})
     maxX = maxV[X_test.columns]
     ypred = model.predict(X_test / maxX.values)*maxX['Top Oil Temperature']
     print(loss_mse(y_test,ypred.reshape(ypred.shape[0])))
