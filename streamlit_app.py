@@ -53,7 +53,9 @@ with tabs[0]:
     ##train Oil temperature prediction model
     if ('OLMS_DATA'  in st.session_state)&('model_oil' not in st.session_state):  
         X, Y = generate_training_data_oil(OLMS_DATA)
+        st.write('Training Oil Temperature Prediction Model...')
         model_oil,oil_threshold = prepare_model_top_oil(X,Y)
+        st.write('Oil Temperature Prediction Model trained')
         st.session_state['model_oil'] = model_oil
         st.session_state['oil_threshold'] = oil_threshold
     else:
