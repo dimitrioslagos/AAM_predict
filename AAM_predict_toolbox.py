@@ -277,6 +277,8 @@ def compute_warning_on_bushing(t,DATA):
     mean = Bushings_last[:-6].mean()
     abs_change = 100*(mean-value).abs()/mean
     warning = abs_change>=10
-
-    return abs_change[warning]
+    Message = pd.DataFrame(columns=warning.index)
+    Message[warning]='Warning'
+    Message[not(warning)]='OK'
+    return Message
 
