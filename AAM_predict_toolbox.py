@@ -280,5 +280,6 @@ def compute_warning_on_bushing(t,DATA):
     Message = pd.DataFrame(columns=warning.index)
     Message.loc[0,Message.columns[warning]] = 'Warning'
     Message.loc[0,Message.columns[warning==False]] = 'OK'
+    Message.index = ['Status']
     return Message
 
