@@ -52,4 +52,7 @@ with tabs[0]:
 with tabs[1]:
     st.header("Real Time Alarms")
     st.subheader("Bushings")
+    Alarms = compute_warning_on_bushing(pd.to_datetime('2024-08-01'),OLMS_DATA)
+    if Alarms.empty:
+        st.write("No warnings on the Bushings. Bushing status ok")
     
