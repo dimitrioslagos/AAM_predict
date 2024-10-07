@@ -1,8 +1,8 @@
 import pandas as pd
 import tensorflow as tf
-import tensorflow_probability as tfp
+#import tensorflow_probability as tfp
 import numpy as np
-from sklearn.model_selection import train_test_split
+#from sklearn.model_selection import train_test_split
 import tf_keras
 from tf_keras import layers
 import plotly.express as px
