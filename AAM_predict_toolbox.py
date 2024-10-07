@@ -12,6 +12,14 @@ maxV = {'Top Oil Temperature':70,'Ambient Temperature':50,'Ambient Shade Tempera
 maxV =  pd.Series(maxV)
 
 
+# Function to display light based on boolean value
+def display_light(value):
+    if value:  # True -> Yellow light
+        return '<div style="width: 50px; height: 50px; background-color: yellow; border-radius: 50%;"></div>'
+    else:  # False -> Green light
+        return '<div style="width: 50px; height: 50px; background-color: green; border-radius: 50%;"></div>'
+
+
 def build_regression_model(input_shape):
     model = tf_keras.Sequential([
         layers.InputLayer(input_shape=input_shape),
