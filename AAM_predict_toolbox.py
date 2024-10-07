@@ -69,27 +69,14 @@ def train_model_bushing_temp_H(X_train,y_train):
     model.save('Models/Bushing_H')
     return model
 
-def predict_top_oil(X_test,y_test,model):
+def predict_top_oil(X_test,y_test,model,threshold):
     #model = tf_keras.models.load_model('Models/Top_Oil',custom_objects={'loss_mse':  loss_mse})
     maxX = maxV[X_test.columns]
     ypred = model.predict(X_test / maxX.values)*maxX['Top Oil Temperature']
-    print(loss_mse(y_test,ypred.reshape(ypred.shape[0])))
-    print((y_test-ypred.reshape(ypred.shape[0])).max())
-    print((y_test - ypred.reshape(ypred.shape[0])).mean())
-    print((y_test - ypred.reshape(ypred.shape[0])).std())
     DATA = pd.DataFrame(columns=['Real','Estimate'])
     DATA['Real'] = y_test
     DATA['Estimate'] = ypred
-    # # Create a scatter plot
-    fig = px.line(DATA, x=DATA.index, y='Estimate', title="Sample Scatter Plot")
-    fig.add_scatter(x=DATA.index, y=DATA['Real'], mode='lines', name='Real', line=dict(color='red'))
-
-    # Save the plot as an HTML file
-    fig.write_html("scatter_plot.html")
-
-    # Show the plot (optional, will open the plot in a browser)
-    fig.show()
-    anomaly_detection_in_oil_temp(ypred,y_test,1)
+    Flags, error = anomaly_detection_in_oil_temp(ypred,y_test,threshold)
     return 0
 
 def predict_T_bushing(model,X_test,y_test):
@@ -248,16 +235,7 @@ def anomaly_detection_in_oil_temp(y_pred,y_true,threshold):
     MR = MRi.diff().dropna()
     Flags = (MR>=threshold).rolling(window=4).mean() >= 0.75
 
-    # fig = px.line(MR, x=MR.index, y=MR, title="Sample Scatter Plot")
-    # #fig.add_scatter(x=MR.index, y=threshold*MR/MR, mode='lines', name='Real', line=dict(color='black'))
-    # fig.add_scatter(x=MR.index, y=Flags.astype('float'), mode='lines', name='Real', line=dict(color='black'))
-    #
-    # # Save the plot as an HTML file
-    # fig.write_html("scatter_plot.html")
-    # # Show the plot (optional, will open the plot in a browser)
-    # fig.show()
-
-    return Flags
+    return Flags, MR
 
 def compute_warning_on_bushing(t,DATA):
     Bushings = pd.DataFrame(columns=['Cap H1','Cap H2','Cap H3','Cap Y1','Cap Y2','Cap Y3',
