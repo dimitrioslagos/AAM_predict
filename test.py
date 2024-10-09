@@ -17,7 +17,7 @@ models = train_models_current(ATF3,horizon=6)
 
 X, Y = generate_training_data_oil(ATF3)
 model_oil, oil_threshold = prepare_model_top_oil(X, Y)
-t = pd.to_datetime('2024-06-13 10:00:00')
+t = pd.to_datetime('2024-06-13 11:00:00')
 #X =X[X.Measurement == 'HV Load Current']
 #X = X['Value'].resample('1h').mean().rename('HV Current')
 #Is = predict_Currents(models,ATF3,horizon=6,t)
