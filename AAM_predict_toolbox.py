@@ -15,6 +15,22 @@ maxV =  pd.Series(maxV)
 
 threshold={'Top Oil Temperature':60}
 
+import scipy.stats as stats
+
+
+def probability_to_exceed(value, mean, std):
+    # Calculate the z-score
+    z = (value - mean) / std
+
+    # Get the cumulative probability up to the value
+    cdf_value = stats.norm.cdf(z.values.tolist())
+
+    # The probability to exceed the value is 1 - CDF
+    exceed_probability = 1 - cdf_value
+
+    return pd.DataFrame(exceed_probability.reshape(1,6),index=['Failure Probability'], columns=z.index)
+
+
 ###
 def html_future_oil_temp_plot(OIL_temp):
     # Create Plotly figure
@@ -232,7 +248,7 @@ def predict_oil_future(model_oil,models,DATA,t):
             OIL_temp.loc[t+pd.Timedelta(hours=i),'min'] =OIL_temp.loc[t+pd.Timedelta(hours=i-1),'min']  + 2*((model_oil.predict((X/maxX))*maxX['Top Oil Temperature'])[0][0]-OIL_temp.loc[t+pd.Timedelta(hours=i-1),'min'])
 
 
-    return OIL_temp
+    return OIL_temp, probability_to_exceed(60, OIL_temp.loc[OIL_temp.index[1:],'mean'], (OIL_temp.loc[OIL_temp.index[1:],'max']-OIL_temp.loc[OIL_temp.index[1:],'mean'])/3.3)
 
 def prepare_model_top_oil(X,Y):
     # Specify the directory path
