@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import math
 from pathlib import Path
-from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_DGA,display_light,generate_training_data_oil,prepare_model_top_oil, predict_top_oil, html_error_plot
+from AAM_predict_toolbox import html_future_oil_temp_plot, train_models_current,compute_warning_on_bushing, compute_warning_on_DGA,display_light,generate_training_data_oil,prepare_model_top_oil, predict_top_oil, html_error_plot
 
 
 
@@ -10,7 +10,7 @@ from AAM_predict_toolbox import compute_warning_on_bushing, compute_warning_on_D
 st.title("Short Term Asset Management")
 
 # Define the tabs
-tabs = st.tabs(["Historical Data Input","Alarms"])
+tabs = st.tabs(["Historical Data Input","Alarms","Predictions"])
 
 # Content for the 'Home' tab
 with tabs[0]:
@@ -69,6 +69,22 @@ with tabs[0]:
         #Only for GA presentation
         X = st.session_state.get('X', None)
         Y = st.session_state.get('Y', None)
+        ##train Oil temperature prediction model
+        if ('OLMS_DATA' in st.session_state) & ('current_models' not in st.session_state):
+            current_models = train_models_current(OLMS_DATA, horizon=6)
+            st.write('Training Current Prediction Model...')
+            model_oil, oil_threshold = prepare_model_top_oil(X, Y)
+            st.write('Current Prediction Model trained')
+            st.session_state['current_models'] = current_models
+            # Only for GA presentation
+            st.session_state['X'] = X
+            st.session_state['Y'] = Y
+        else:
+            st.write('Current Prediction Model trained')
+            current_models = st.session_state.get('current_models', None)
+            # Only for GA presentation
+            X = st.session_state.get('X', None)
+            Y = st.session_state.get('Y', None)
 
 with tabs[1]:
     st.header("Real Time Alarms")
@@ -118,3 +134,9 @@ with tabs[1]:
             st.write('Model Output past 24 hours')
             st.components.v1.html(html_error_plot(Error,oil_threshold), height=500)
     
+with tabs[2]:
+    st.subheader("Oil Temperature Prediction")
+    if ('model_oil' in st.session_state)&('current_models' in st.session_state):
+        t = pd.to_datetime('2024-06-13 08:00:00')
+        OIL_temp = predict_oil_future(model_oil, models, ATF3, t)
+        st.components.v1.html(html_future_oil_temp_plot(OIL_temp))
