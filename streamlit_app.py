@@ -135,6 +135,6 @@ with tabs[1]:
 with tabs[2]:
     st.subheader("Oil Temperature Prediction")
     if ('model_oil' in st.session_state)&('current_models' in st.session_state):
-        t = pd.to_datetime('2024-06-13 08:00:00')
+        t = pd.to_datetime('2024-06-13 09:00:00')
         OIL_temp = predict_oil_future(model_oil, current_models, OLMS_DATA, t)
         st.components.v1.html(html_future_oil_temp_plot(OIL_temp),height=600)
