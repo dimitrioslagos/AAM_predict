@@ -3,4 +3,4 @@ pandas
 tensorflow
 tf_keras
 plotly
-sklearn
+scikit-learn
