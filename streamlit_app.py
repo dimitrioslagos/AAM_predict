@@ -63,28 +63,26 @@ with tabs[0]:
         st.session_state['X'] = X
         st.session_state['Y'] = Y
     else:
-        st.write('Oil Temperature Prediction Model trained')
+        st.write('Oil Temperature Prediction Model not trained')
         oil_threshold = st.session_state.get('oil_threshold', None)
         model_oil = st.session_state.get('model_oil', None)
         #Only for GA presentation
         X = st.session_state.get('X', None)
         Y = st.session_state.get('Y', None)
         ##train Oil temperature prediction model
-        if ('OLMS_DATA' in st.session_state) & ('current_models' not in st.session_state):
-            current_models = train_models_current(OLMS_DATA, horizon=6)
-            st.write('Training Current Prediction Model...')
-            model_oil, oil_threshold = prepare_model_top_oil(X, Y)
-            st.write('Current Prediction Model trained')
-            st.session_state['current_models'] = current_models
-            # Only for GA presentation
-            st.session_state['X'] = X
-            st.session_state['Y'] = Y
-        else:
-            st.write('Current Prediction Model trained')
-            current_models = st.session_state.get('current_models', None)
-            # Only for GA presentation
-            X = st.session_state.get('X', None)
-            Y = st.session_state.get('Y', None)
+    if ('OLMS_DATA' in st.session_state) & ('current_models' not in st.session_state):
+        current_models = train_models_current(OLMS_DATA, horizon=6)
+        st.write('Training Current Prediction Model...')
+        model_oil, oil_threshold = prepare_model_top_oil(X, Y)
+        st.write('Current Prediction Model trained')
+        st.session_state['current_models'] = current_models
+        # Only for GA presentation
+        st.session_state['X'] = X
+        st.session_state['Y'] = Y
+    else:
+        st.write('Current Prediction Model not trained')
+        current_models = st.session_state.get('current_models', None)
+
 
 with tabs[1]:
     st.header("Real Time Alarms")
