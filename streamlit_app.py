@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import math
 from pathlib import Path
-from AAM_predict_toolbox import html_future_oil_temp_plot, train_models_current,compute_warning_on_bushing, compute_warning_on_DGA,display_light,generate_training_data_oil,prepare_model_top_oil, predict_top_oil, html_error_plot
+from AAM_predict_toolbox import predict_oil_future, html_future_oil_temp_plot, train_models_current,compute_warning_on_bushing, compute_warning_on_DGA,display_light,generate_training_data_oil,prepare_model_top_oil, predict_top_oil, html_error_plot
 
 
 
@@ -138,5 +138,5 @@ with tabs[2]:
     st.subheader("Oil Temperature Prediction")
     if ('model_oil' in st.session_state)&('current_models' in st.session_state):
         t = pd.to_datetime('2024-06-13 08:00:00')
-        OIL_temp = predict_oil_future(model_oil, models, ATF3, t)
+        OIL_temp = predict_oil_future(model_oil, curremt_models, OLMS_DATA, t)
         st.components.v1.html(html_future_oil_temp_plot(OIL_temp))
