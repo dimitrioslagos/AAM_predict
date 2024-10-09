@@ -247,7 +247,7 @@ def predict_oil_future(model_oil,models,DATA,t):
             X['Top Oil Temperature'] = OIL_temp.loc[t + pd.Timedelta(hours=i - 1), 'min']
             OIL_temp.loc[t+pd.Timedelta(hours=i),'min'] =OIL_temp.loc[t+pd.Timedelta(hours=i-1),'min']  + 2*((model_oil.predict((X/maxX))*maxX['Top Oil Temperature'])[0][0]-OIL_temp.loc[t+pd.Timedelta(hours=i-1),'min'])
 
-    Probs = probability_to_exceed(60, OIL_temp.loc[OIL_temp.index[1:],'mean'], (OIL_temp.loc[OIL_temp.index[1:],'max']-OIL_temp.loc[OIL_temp.index[1:],'mean'])/3.0)
+    Probs = probability_to_exceed(60, OIL_temp.loc[OIL_temp.index[1:],'mean'], (OIL_temp.loc[OIL_temp.index[1:],'max']-OIL_temp.loc[OIL_temp.index[1:],'mean'])/3.4)
     return OIL_temp, Probs
 
 def prepare_model_top_oil(X,Y):
