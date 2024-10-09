@@ -1,16 +1,62 @@
 import pandas as pd
 import tensorflow as tf
-#import tensorflow_probability as tfp
 import numpy as np
-#from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split
 import tf_keras
 from tf_keras import layers
 import plotly.express as px
 import os
 import plotly.graph_objects as go
+import shap
+from sklearn.ensemble import RandomForestRegressor
+
 
 maxV = {'Top Oil Temperature':70,'Ambient Temperature':50,'Ambient Shade Temperature':50,'HV Current':300}
 maxV =  pd.Series(maxV)
+
+threshold={'Top Oil Temperature':60}
+
+###
+def html_future_oil_temp_plot(OIL_temp):
+    # Create Plotly figure
+    fig = go.Figure()
+
+    # Add the first line
+    fig.add_trace(go.Scatter(x=OIL_temp.index, y=OIL_temp['max'].values, mode='lines', name='max'))
+    fig.add_trace(go.Scatter(x=OIL_temp.index, y=OIL_temp['mean'].values, mode='lines', name='mean'))
+    fig.add_trace(go.Scatter(x=OIL_temp.index, y=OIL_temp['min'].values, mode='lines', name='min'))
+
+    # Fill the area between min and max lines
+    fig.add_trace(go.Scatter(
+        x=OIL_temp.index,
+        y=OIL_temp['max'].values,
+        mode='lines',
+        line=dict(color='rgba(255, 255, 255, 0)'),  # Transparent line for the max line
+        showlegend=False,
+        name='max'
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=OIL_temp.index,
+        y=OIL_temp['min'].values,
+        mode='lines',
+        line=dict(color='rgba(255, 255, 255, 0)'),  # Transparent line for the min line
+        fill='tonexty',  # Fill area between this line and the previous line
+        fillcolor='rgba(128, 128, 128, 0.5)',  # Gray color with some transparency
+        showlegend=False,
+        name='min'
+    ))
+
+    # Add the second line
+    fig.add_trace(go.Scatter(x=OIL_temp.index, y=threshold['Top Oil Temperature'] * OIL_temp['min'].values / OIL_temp['min'].values, mode='lines', name='Treshold'))
+
+    # Customize the layout (optional)
+    fig.update_layout(title="Oil Temperature Forecast (°C)",
+                      showlegend=False,
+                      template="plotly_white")
+    fig.show()
+    return fig.to_html()
+
 
 #Function to generate error plot
 def html_error_plot(error,threshold):
@@ -47,15 +93,42 @@ def display_light(value):
 def build_regression_model(input_shape):
     model = tf_keras.Sequential([
         layers.InputLayer(input_shape=input_shape),
-        layers.Dense(64, activation='relu'),
+        layers.Dense(32, activation='relu'),
         layers.Dense(32, activation='relu'),
         layers.Dense(1),
     ])
     return model
 
+def build_regression_model_I(input_shape):
+    model = tf_keras.Sequential([
+        layers.InputLayer(input_shape=input_shape),
+        layers.Dense(32, activation='relu'),
+        layers.Dense(32, activation='relu'),
+        layers.Dense(1),
+    ])
+    return model
+
+
 def loss_mse(y_true, y_pred):
     e = y_true - y_pred
     return tf.reduce_mean(e*e)
+
+
+def quantile_loss(q):
+    """Creates a quantile loss function for a given quantile q.
+
+    Args:
+        q (float): The quantile to predict (e.g., 0.5 for median).
+
+    Returns:
+        loss function: A quantile loss function for use with model compilation.
+    """
+
+    def loss(y_true, y_pred):
+        error = (y_true - y_pred)
+        return tf.reduce_mean(tf.maximum(q * error, (q - 1) * error))
+
+    return loss
 
 def train_model_top_oil(X_train,y_train):
     maxX = maxV[X_train.columns]
@@ -65,9 +138,104 @@ def train_model_top_oil(X_train,y_train):
     # Compile the model
     model.compile(optimizer='adam', loss=loss_mse)
     # Train the model
-    history = model.fit(X_train / maxX, y_train / maxX['Top Oil Temperature'], epochs=30, verbose=0)
+    history = model.fit(X_train / maxX, y_train / maxX['Top Oil Temperature'], epochs=50, verbose=0)
     #model.save('Models/Top_Oil')
+    # Create a SHAP explainer
     return model
+
+def predict_quantiles(model, X, quantiles):
+    predictions = []
+    for q in quantiles:
+        pred = np.percentile([tree.predict(X) for tree in model.estimators_], q * 100, axis=0)
+        predictions.append(pred)
+    return np.array(predictions).T
+
+def train_model_current(X_train,y_train):
+    maxX = pd.Series(index=X_train.columns)
+    for i in maxX.index:
+        if 'HV Current' in i:
+            maxX[i] = maxV['HV Current']
+        elif i == 'h':
+            maxX[i] = 23
+        elif i == 'm':
+            maxX[i] = 12
+        elif i == 'd':
+            maxX[i] = 6
+        else:
+            maxX[i] = maxV[i]
+    # Instantiate the model
+    if y_train.isna().any():
+        X_train.drop(index = y_train.index[y_train.isna()],inplace=True)
+        y_train.drop(index= y_train.index[y_train.isna()], inplace=True)
+
+    model = RandomForestRegressor(n_estimators=100, random_state=42)
+    model.fit(X_train, y_train)
+
+    return model
+
+def predict_I_value(model,X_test):
+    quantiles = [0.5,0.75,0.9,0.99]
+    quantile_predictions = predict_quantiles(model, X_test, quantiles)
+    quantile_df = pd.DataFrame(quantile_predictions, columns=[f'quantile_{q}' for q in quantiles])
+    return quantile_df
+
+def train_models_current(DATA,horizon):
+    models = []
+    for i in range(1,horizon+1):
+        X, Y = generate_current_training_data(DATA, horizon=i)
+        models.append(train_model_current(X, Y))
+    return models
+
+def predict_Currents(models,DATA,horizon,t):
+    ##
+    quantiles = [0.5]
+    ##
+    t = pd.to_datetime('2024-06-13 08:00:00')
+    ##
+    qs = pd.DataFrame(index =[t+pd.Timedelta(hours=i) for i in range(1,horizon+1)],
+                                                                  columns=[f'quantile_{q}' for q in quantiles])
+    for i in range(1,horizon+1):
+        X, Y = generate_current_training_data(DATA, horizon=i)
+        X = X[X.index == t]
+        df = predict_I_value(models[i-1], X)
+        qs.loc[t+pd.Timedelta(hours=i),:] = df[qs.columns].values
+
+    return qs
+
+def predict_oil_future(model_oil,models,DATA,t):
+    horizon = len(models)
+    Is = predict_Currents(models,DATA,horizon,t)
+    Xoil,Yoil = generate_training_data_oil(DATA)
+    maxX = maxV[Xoil.columns]
+    Xoil = Xoil[(Xoil.index>=t)&(Xoil.index<=t+pd.Timedelta(hours=horizon))]
+    OIL_temp = pd.DataFrame(index=[t+pd.Timedelta(hours=h) for h in range(horizon+1)],columns=['max','mean','min'])
+    OIL_temp.loc[t]=Yoil[t]
+    for i in range(1,horizon+1):
+        if i==1:
+            Oil_in = Xoil.loc[t+pd.Timedelta(hours=1)]
+            Oil_in['HV Current'] = Is.loc[t+pd.Timedelta(hours=1)].values[0]+16*3
+            Oil_in['Top Oil Temperature'] = Yoil[t]
+            X = pd.DataFrame(Oil_in.values.reshape(1,Xoil.shape[1]),index=[t+pd.Timedelta(hours=1)],columns=Oil_in.index)
+            OIL_temp.loc[t+pd.Timedelta(hours=1),'max'] =Yoil[t] + 2*((model_oil.predict((X/maxX))*maxX['Top Oil Temperature'])[0][0]-Yoil[t])
+            X['HV Current']=X['HV Current']-16*3
+            OIL_temp.loc[t+pd.Timedelta(hours=1),'mean'] =Yoil[t] + 2*((model_oil.predict((X/maxX))*maxX['Top Oil Temperature'])[0][0]-Yoil[t])
+            X['HV Current']=X['HV Current']-16*3
+            OIL_temp.loc[t+pd.Timedelta(hours=1),'min'] =Yoil[t] + 2*((model_oil.predict((X/maxX))*maxX['Top Oil Temperature'])[0][0]-Yoil[t])
+        else:
+            Oil_in = Xoil.loc[t + pd.Timedelta(hours=i)]
+            Oil_in['HV Current'] = Is.loc[t+pd.Timedelta(hours=i)].values[0]+16*3
+            Oil_in['Top Oil Temperature'] = OIL_temp.loc[t+pd.Timedelta(hours=i-1),'max']
+            X = pd.DataFrame(Oil_in.values.reshape(1,Xoil.shape[1]),index=[t+pd.Timedelta(hours=i)],columns=Oil_in.index)
+            OIL_temp.loc[t+pd.Timedelta(hours=i),'max'] =OIL_temp.loc[t+pd.Timedelta(hours=i-1),'max'] + 2*((model_oil.predict((X/maxX))*maxX['Top Oil Temperature'])[0][0]-OIL_temp.loc[t+pd.Timedelta(hours=i-1),'max'])
+            X['HV Current']=X['HV Current']-16*3
+            X['Top Oil Temperature']= OIL_temp.loc[t+pd.Timedelta(hours=i-1),'mean']
+            OIL_temp.loc[t+pd.Timedelta(hours=i),'mean'] =OIL_temp.loc[t+pd.Timedelta(hours=i-1),'mean']  + 2*((model_oil.predict((X/maxX))*maxX['Top Oil Temperature'])[0][0]-OIL_temp.loc[t+pd.Timedelta(hours=i-1),'mean'])
+            X['HV Current']=X['HV Current']-16*3
+            X['Top Oil Temperature'] = OIL_temp.loc[t + pd.Timedelta(hours=i - 1), 'min']
+            OIL_temp.loc[t+pd.Timedelta(hours=i),'min'] =OIL_temp.loc[t+pd.Timedelta(hours=i-1),'min']  + 2*((model_oil.predict((X/maxX))*maxX['Top Oil Temperature'])[0][0]-OIL_temp.loc[t+pd.Timedelta(hours=i-1),'min'])
+
+
+    return OIL_temp
 
 def prepare_model_top_oil(X,Y):
     # Specify the directory path
@@ -80,18 +248,6 @@ def prepare_model_top_oil(X,Y):
     return model, threshold
 
 
-
-def train_model_bushing_temp_H(X_train,y_train):
-    maxX = pd.Series([50,50,50,288,50,50,288],index=X_train.columns)
-    # Instantiate the model
-    input_shape = (X_train.shape[1],)  # Assuming X_train is your feature matrix
-    model = build_regression_model(input_shape)
-    # Compile the model
-    model.compile(optimizer='adam', loss=loss_mse)
-    # Train the model
-    history = model.fit(X_train / maxX, y_train / maxX.values[0], epochs=30, verbose=0)
-    model.save('Models/Bushing_H')
-    return model
 
 def predict_top_oil(X_test,y_test,model,threshold):
     #model = tf_keras.models.load_model('Models/Top_Oil',custom_objects={'loss_mse':  loss_mse})
@@ -219,7 +375,7 @@ def prepare_DGA_df(DATA):
     return DGA
 
 def prepare_top_oil_relevant_data(DATA):
-    OIL = pd.DataFrame(columns=['Top Oil Temperature','Ambient Temperature','Ambient Shade Temperature','HV Current'])
+    OIL = pd.DataFrame(columns=['Top Oil Temperature','Ambient Temperature','HV Current'])
     OLMS_mapping = {'Top Oil Temperature':'Top Oil Temp',
                    'Ambient Temperature':'Ampient Sun',
                     'Ambient Shade Temperature':'Ampient Shade',
@@ -237,10 +393,6 @@ def data_cleaning_for_top_oil_train(DATA):
     fig = px.line(H2, x=H2.index, y=H2, title="Sample Scatter Plot")
     fig.add_scatter(x=CH4.index, y=CH4, mode='lines', name='Real', line=dict(color='black'))
 
-    # Save the plot as an HTML file
-    fig.write_html("DGA_plot.html")
-    fig.show()
-    ##
     ids = compute_normal_scenarios(DGA)
     OIL = OIL.loc[ids]
     OIL.dropna(inplace=True)
@@ -252,6 +404,39 @@ def generate_training_data_oil(DATA):
     train_ids = train_ids[1:]
     Y = OIL.loc[train_ids,'Top Oil Temperature']
     X = OIL.shift(1).loc[train_ids]
+    return X, Y
+
+def prepare_current_relevant_data(DATA):
+    Loading = pd.DataFrame(columns=['Ambient Temperature','Ambient Shade Temperature','HV Current'])
+    Loading_mapping = {'Ambient Temperature':'Ampient Sun',
+                    'Ambient Shade Temperature':'Ampient Shade',
+                    'HV Current':'HV Load Current'}
+    for col in Loading.columns:
+        Loading[col]=DATA.loc[DATA.Measurement == Loading_mapping[col], 'Value'].resample('1h').mean()
+    return Loading
+
+def generate_current_training_data(DATA,horizon):
+    Loading = prepare_current_relevant_data(DATA)
+    flag = (Loading.rolling('26h').count().sum(axis=1) == (26)*Loading.shape[1]) & \
+           (Loading.index.isin(Loading.index.shift(-horizon, freq='h')))
+    X = [Loading.shift(1).loc[flag,'HV Current']]
+    for i in range(2,6,1):
+        X.append(Loading.shift(i).loc[flag,'HV Current'].rename('HV Current_'+str(i)))
+    X = pd.concat(X, axis=1)
+    X['h'] = (Loading.index[flag]+pd.Timedelta(hours=horizon-1)).hour
+    X['m'] = (Loading.index[flag]+pd.Timedelta(hours=horizon-1)).month
+    X['d'] = (Loading.index[flag] + pd.Timedelta(hours=horizon - 1)).dayofweek
+    #X['Ambient Temperature'] = Loading.loc[flag,'Ambient Temperature']#Loading.shift(1).loc[flag,'Ambient Temperature']
+    Y = Loading.loc[Loading.index[flag]+pd.Timedelta(hours=horizon-1),'HV Current']
+    Y.index = X.index
+    #Yest = pd.Series(index=Y.index,name=Y.name)
+    #Loading['month'] = Loading.index.month
+    #Loading['hour'] = Loading.index.hour
+    #Loading['day'] = Loading.index.dayofweek
+    #Data_Aggr_std =Loading.groupby(['month', 'hour','day'])['HV Current'].std()
+    #Data_Aggr_m = Loading.groupby(['month', 'hour', 'day'])['HV Current'].mean()
+    #for i in Y.index:
+        #Yest.loc[i] = Data_Aggr_m[i.month,i.hour,i.dayofweek]+3*Data_Aggr_std[i.month,i.hour,i.dayofweek]
     return X, Y
 
 def anomaly_detection_in_oil_temp(y_pred,y_true,threshold):

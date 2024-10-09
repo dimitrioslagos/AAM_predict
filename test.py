@@ -1,6 +1,6 @@
 import pandas as pd
 import plotly.express as px
-from AAM_predict_toolbox import generate_training_data_oil, prepare_model_top_oil, predict_top_oil, compute_warning_on_bushing
+from AAM_predict_toolbox import html_future_oil_temp_plot,predict_oil_future,prepare_model_top_oil,generate_current_training_data, train_models_current,predict_Currents,generate_training_data_oil
 import tf_keras
 
 ATF3 = pd.read_csv('QTMS_Data-2024-09-30_15-55-42_ATF8.csv',delimiter=';')
@@ -13,48 +13,16 @@ ATF3.index = T
 ATF3.drop(ATF3.index[ATF3.Logs=='SENSOR ERROR 1'],inplace=True)
 ATF3.drop(columns=['Logs'],inplace=True)
 
+models = train_models_current(ATF3,horizon=6)
+
 X, Y = generate_training_data_oil(ATF3)
-compute_warning_on_bushing(pd.to_datetime('2024-08-01'),ATF3)
-
-X_train = X[X.index < pd.to_datetime('2024-08-01')]
-X_test = X[X.index >= pd.to_datetime('2024-08-01')]
-y_train = Y[Y.index < pd.to_datetime('2024-08-01')]
-y_test = Y[Y.index >= pd.to_datetime('2024-08-01')]
-
-model = prepare_model_top_oil(X_train,y_train)
-predict_top_oil(X_test,y_test)
-
-
-
-
-Cap_H1 = ATF3.loc[ATF3.Measurement=='BUSHING H1 Capacitance','Value'].resample('0.5h').mean()
-delta_H1 = ATF3.loc[ATF3.Measurement=='BUSHING H1 Tan delta','Value'].resample('0.5h').mean()
-T_H1 = ATF3.loc[ATF3.Measurement=='BUSHING H1 Temperature','Value'].resample('0.5h').mean()
-Cap_H2 = ATF3.loc[ATF3.Measurement=='BUSHING H2 Capacitance','Value'].resample('0.5h').mean()
-delta_H2 = ATF3.loc[ATF3.Measurement=='BUSHING H2 Tan delta','Value'].resample('0.5h').mean()
-T_H2 = ATF3.loc[ATF3.Measurement=='BUSHING H2 Temperature','Value'].resample('0.5h').mean()
-Cap_H3 = ATF3.loc[ATF3.Measurement=='BUSHING H3 Capacitance','Value'].resample('0.5h').mean()
-delta_H3 = ATF3.loc[ATF3.Measurement=='BUSHING H3 Tan delta','Value'].resample('0.5h').mean()
-T_H3 = ATF3.loc[ATF3.Measurement=='BUSHING H3 Temperature','Value'].resample('0.5h').mean()
-####
-Cap_Y1 = ATF3.loc[ATF3.Measurement=='BUSHING Y1 Capacitance','Value'].resample('0.5h').mean()
-delta_Y1 = ATF3.loc[ATF3.Measurement=='BUSHING Y1 Tan delta','Value'].resample('0.5h').mean()
-T_Y1 = ATF3.loc[ATF3.Measurement=='BUSHING Y1 Temperature','Value'].resample('0.5h').mean()
-Cap_Y2 = ATF3.loc[ATF3.Measurement=='BUSHING Y2 Capacitance','Value'].resample('0.5h').mean()
-delta_Y2 = ATF3.loc[ATF3.Measurement=='BUSHING Y2 Tan delta','Value'].resample('0.5h').mean()
-T_Y2 = ATF3.loc[ATF3.Measurement=='BUSHING Y2 Temperature','Value'].resample('0.5h').mean()
-Cap_Y3 = ATF3.loc[ATF3.Measurement=='BUSHING Y3 Capacitance','Value'].resample('0.5h').mean()
-delta_Y3 = ATF3.loc[ATF3.Measurement=='BUSHING Y3 Tan delta','Value'].resample('0.5h').mean()
-T_Y3 = ATF3.loc[ATF3.Measurement=='BUSHING Y3 Temperature','Value'].resample('0.5h').mean()
-
-
-
-
-
-
-#model = tf_keras.models.load_model('Models/Bushing_H',custom_objects={'loss_mse':  loss_mse})
-
-#predict_T_bushing(model,X_test,y_test)
+model_oil, oil_threshold = prepare_model_top_oil(X, Y)
+t = pd.to_datetime('2024-06-13 08:00:00')
+#X =X[X.Measurement == 'HV Load Current']
+#X = X['Value'].resample('1h').mean().rename('HV Current')
+#Is = predict_Currents(models,ATF3,horizon=6,t)
+OIL_temp = predict_oil_future(model_oil,models,ATF3,t)
+html_future_oil_temp_plot(OIL_temp)
 print('a')
 # # Create a scatter plot
 
