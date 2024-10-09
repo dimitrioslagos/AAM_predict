@@ -188,9 +188,7 @@ def train_models_current(DATA,horizon):
 def predict_Currents(models,DATA,horizon,t):
     ##
     quantiles = [0.5]
-    ##
-    t = pd.to_datetime('2024-06-13 08:00:00')
-    ##
+    ##    ##
     qs = pd.DataFrame(index =[t+pd.Timedelta(hours=i) for i in range(1,horizon+1)],
                                                                   columns=[f'quantile_{q}' for q in quantiles])
     for i in range(1,horizon+1):
