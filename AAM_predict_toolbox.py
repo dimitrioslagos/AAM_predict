@@ -26,7 +26,7 @@ def probability_to_exceed(value, mean, std):
     cdf_value = stats.norm.cdf(z.values.tolist())
 
     # The probability to exceed the value is 1 - CDF
-    exceed_probability = 1 - cdf_value
+    exceed_probability = cdf_value
 
     return pd.DataFrame(exceed_probability.reshape(1,6),index=['Failure Probability (%)'], columns=z.index)
 
