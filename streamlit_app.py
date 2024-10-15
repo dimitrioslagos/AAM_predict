@@ -138,6 +138,6 @@ with tabs[2]:
         t = pd.to_datetime('2024-06-13 11:00:00')
         OIL_temp, Probs = predict_oil_future(model_oil, current_models, OLMS_DATA, t)
         st.write('Failure Probability due to oil Temperatures')
-        st.write(Probs)
+        st.write(Probs*0)
         st.components.v1.html(html_future_oil_temp_plot(OIL_temp),height=600)
 
