@@ -20,11 +20,12 @@ import scipy.stats as stats
 
 def probability_to_exceed(value, mean, std):
     # Calculate the z-score
+    print(value, mean,std)
     z = (value - mean) / std
-
+    print(z)
     # Get the cumulative probability up to the value
     cdf_value = stats.norm.cdf(z.values.tolist())
-
+    print(cdf)
     # The probability to exceed the value is 1 - CDF
     exceed_probability = cdf_value
 
