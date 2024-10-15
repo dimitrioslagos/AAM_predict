@@ -25,7 +25,7 @@ def probability_to_exceed(value, mean, std):
     print(z)
     # Get the cumulative probability up to the value
     cdf_value = stats.norm.cdf(z.values.tolist())
-    print(cdf)
+    print(cdf_value)
     # The probability to exceed the value is 1 - CDF
     exceed_probability = cdf_value
 
