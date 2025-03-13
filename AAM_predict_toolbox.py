@@ -11,6 +11,20 @@ from sklearn.ensemble import RandomForestRegressor
 
 
 maxV = {'Top Oil Temperature':70,'Ambient Temperature':50,'Ambient Shade Temperature':50,'HV Current':300}
+OLMS_mapping = {'H2':'TM8 0 H2inOil','CH4':'TM8 0 CH4inOil','C2H2':'TM8 0 C2H2inOil',
+                    'C2H6':'TM8 0 C2H6inOil','C2H4':'TM8 0 C2H4inOil'}
+Bushings_mapping = {'Cap H1':'BUSHING H1 Capacitance',
+                        'Cap H2':'BUSHING H2 Capacitance',
+                        'Cap H3':'BUSHING H3 Capacitance',
+                         'Cap Y1':'BUSHING Y1 Capacitance',
+                   'Cap Y2':'BUSHING Y2 Capacitance',
+                    'Cap Y3':'BUSHING Y3 Capacitance',
+                    'tand H1':'BUSHING H1 Tan delta',
+                    'tand H2':'BUSHING H2 Tan delta',
+                    'tand H3':'BUSHING H3 Tan delta',
+                    'tand Y1':'BUSHING Y1 Tan delta',
+                    'tand Y2':'BUSHING Y2 Tan delta',
+                    'tand Y3':'BUSHING Y3 Tan delta'}
 maxV =  pd.Series(maxV)
 
 threshold={'Top Oil Temperature':60}

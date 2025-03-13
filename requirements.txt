@@ -4,3 +4,5 @@ tensorflow
 tf_keras
 plotly
 scikit-learn
+numpy==1.26.4
+
