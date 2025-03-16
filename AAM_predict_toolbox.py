@@ -10,20 +10,6 @@ import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestRegressor
 
 maxV = {'Top Oil Temperature': 70, 'Ambient Temperature': 50, 'Ambient Shade Temperature': 50, 'HV Current': 300}
-OLMS_mapping = {'H2': 'TM8 0 H2inOil', 'CH4': 'TM8 0 CH4inOil', 'C2H2': 'TM8 0 C2H2inOil',
-                'C2H6': 'TM8 0 C2H6inOil', 'C2H4': 'TM8 0 C2H4inOil'}
-Bushings_mapping = {'Cap H1': 'BUSHING H1 Capacitance',
-                    'Cap H2': 'BUSHING H2 Capacitance',
-                    'Cap H3': 'BUSHING H3 Capacitance',
-                    'Cap Y1': 'BUSHING Y1 Capacitance',
-                    'Cap Y2': 'BUSHING Y2 Capacitance',
-                    'Cap Y3': 'BUSHING Y3 Capacitance',
-                    'tand H1': 'BUSHING H1 Tan delta',
-                    'tand H2': 'BUSHING H2 Tan delta',
-                    'tand H3': 'BUSHING H3 Tan delta',
-                    'tand Y1': 'BUSHING Y1 Tan delta',
-                    'tand Y2': 'BUSHING Y2 Tan delta',
-                    'tand Y3': 'BUSHING Y3 Tan delta'}
 maxV = pd.Series(maxV)
 
 threshold = {'Top Oil Temperature': 60}
@@ -85,7 +71,7 @@ def html_future_oil_temp_plot(OIL_temp):
     fig.update_layout(title="Oil Temperature Forecast (°C)",
                       showlegend=False,
                       template="plotly_white")
-    fig.show()
+    #fig.show()
     return fig.to_html()
 
 
@@ -214,22 +200,22 @@ def predict_I_value(model, X_test):
     return quantile_df
 
 
-def train_models_current(DATA, horizon):
+def train_models_current(DATA, Loading_mapping, horizon):
     models = []
     for i in range(1, horizon + 1):
-        X, Y = generate_current_training_data(DATA, horizon=i)
+        X, Y = generate_current_training_data(DATA, Loading_mapping, horizon=i)
         models.append(train_model_current(X, Y))
     return models
 
 
-def predict_Currents(models, DATA, horizon, t):
+def predict_Currents(models, DATA, Loading_mapping, horizon, t):
     ##
     quantiles = [0.5]
     ##    ##
     qs = pd.DataFrame(index=[t + pd.Timedelta(hours=i) for i in range(1, horizon + 1)],
                       columns=[f'quantile_{q}' for q in quantiles])
     for i in range(1, horizon + 1):
-        X, Y = generate_current_training_data(DATA, horizon=i)
+        X, Y = generate_current_training_data(DATA, Loading_mapping, horizon=i)
         X = X[X.index == t]
         df = predict_I_value(models[i - 1], X)
         qs.loc[t + pd.Timedelta(hours=i), :] = df[qs.columns].values
@@ -237,10 +223,10 @@ def predict_Currents(models, DATA, horizon, t):
     return qs
 
 
-def predict_oil_future(model_oil, models, DATA, OLMS_mapping, t):
+def predict_oil_future(model_oil, models, DATA, OLMS_top_oil_mapping, Loading_mapping, DGA_mapping, t):
     horizon = len(models)
-    Is = predict_Currents(models, DATA, horizon, t)
-    Xoil, Yoil = generate_training_data_oil(DATA, OLMS_mapping)
+    Is = predict_Currents(models, DATA, Loading_mapping, horizon, t)
+    Xoil, Yoil = generate_training_data_oil(DATA, OLMS_top_oil_mapping, DGA_mapping)
     maxX = maxV[Xoil.columns]
     Xoil = Xoil[(Xoil.index >= t) & (Xoil.index <= t + pd.Timedelta(hours=horizon))]
     OIL_temp = pd.DataFrame(index=[t + pd.Timedelta(hours=h) for h in range(horizon + 1)],
@@ -428,10 +414,10 @@ def compute_normal_scenarios(DGA):
     return ids
 
 
-def prepare_DGA_df(DATA):
+def prepare_DGA_df(DATA, OLMS_mapping):
     DGA = pd.DataFrame(columns=['H2', 'CH4', 'C2H2', 'C2H6', 'C2H4'])
-    OLMS_mapping = {'H2': 'TM8 0 H2inOil', 'CH4': 'TM8 0 CH4inOil', 'C2H2': 'TM8 0 C2H2inOil',
-                    'C2H6': 'TM8 0 C2H6inOil', 'C2H4': 'TM8 0 C2H4inOil'}
+    # OLMS_mapping = {'H2': 'TM8 0 H2inOil', 'CH4': 'TM8 0 CH4inOil', 'C2H2': 'TM8 0 C2H2inOil',
+    #                 'C2H6': 'TM8 0 C2H6inOil', 'C2H4': 'TM8 0 C2H4inOil'}
     for col in DGA.columns:
         DGA[col] = DATA.loc[DATA.Measurement == OLMS_mapping[col], 'Value'].resample('0.5h').mean()
     # CO2 = ATF3.loc[ATF3.Measurement == 'TM8 0 CO2inOil', 'Value'].resample('0.5h').mean()
@@ -439,16 +425,20 @@ def prepare_DGA_df(DATA):
     return DGA
 
 
-def prepare_top_oil_relevant_data(DATA, OLMS_mapping):
+def prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping):
     OIL = pd.DataFrame(columns=['Top Oil Temperature', 'Ambient Temperature', 'HV Current'])
+    # OLMS_mapping = {'Top Oil Temperature':'Top Oil Temp',
+    #                'Ambient Temperature':'Ampient Sun',
+    #                 'Ambient Shade Temperature':'Ampient Shade',
+    #                 'HV Current':'HV Load Current'}
     for col in OIL.columns:
-        OIL[col] = DATA.loc[DATA.Measurement == OLMS_mapping[col], 'Value'].resample('0.5h').mean()
+        OIL[col] = DATA.loc[DATA.Measurement == OLMS_DATA_top_oil_mapping[col], 'Value'].resample('0.5h').mean()
     return OIL
 
 
-def data_cleaning_for_top_oil_train(DATA, OLMS_mapping):
-    OIL = prepare_top_oil_relevant_data(DATA, OLMS_mapping)
-    DGA = prepare_DGA_df(DATA)
+def data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping):
+    OIL = prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping)
+    DGA = prepare_DGA_df(DATA, DGA_mapping)
     ##
     H2 = DGA['H2'].rolling(window=5).mean()
     CH4 = DGA['CH4'].rolling(window=5).mean()
@@ -461,8 +451,8 @@ def data_cleaning_for_top_oil_train(DATA, OLMS_mapping):
     return OIL
 
 
-def generate_training_data_oil(DATA, OLMS_mapping):
-    OIL = data_cleaning_for_top_oil_train(DATA, OLMS_mapping)
+def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping):
+    OIL = data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping)
     train_ids = OIL.index[OIL.rolling('0.5h').count().sum(axis=1) == OIL.shape[1]]
     train_ids = train_ids[1:]
     Y = OIL.loc[train_ids, 'Top Oil Temperature']
@@ -470,18 +460,18 @@ def generate_training_data_oil(DATA, OLMS_mapping):
     return X, Y
 
 
-def prepare_current_relevant_data(DATA):
+def prepare_current_relevant_data(DATA, Loading_mapping):
     Loading = pd.DataFrame(columns=['Ambient Temperature', 'Ambient Shade Temperature', 'HV Current'])
-    Loading_mapping = {'Ambient Temperature': 'Ampient Sun',
-                       'Ambient Shade Temperature': 'Ampient Shade',
-                       'HV Current': 'HV Load Current'}
+    # Loading_mapping = {'Ambient Temperature': 'Ampient Sun',
+    #                    'Ambient Shade Temperature': 'Ampient Shade',
+    #                    'HV Current': 'HV Load Current'}
     for col in Loading.columns:
         Loading[col] = DATA.loc[DATA.Measurement == Loading_mapping[col], 'Value'].resample('1h').mean()
     return Loading
 
 
-def generate_current_training_data(DATA, horizon):
-    Loading = prepare_current_relevant_data(DATA)
+def generate_current_training_data(DATA, Loading_mapping, horizon):
+    Loading = prepare_current_relevant_data(DATA, Loading_mapping)
     flag = (Loading.rolling('26h').count().sum(axis=1) == (26) * Loading.shape[1]) & \
            (Loading.index.isin(Loading.index.shift(-horizon, freq='h')))
     X = [Loading.shift(1).loc[flag, 'HV Current']]
@@ -513,21 +503,21 @@ def anomaly_detection_in_oil_temp(y_pred, y_true, threshold):
     return Flags, MR
 
 
-def compute_warning_on_bushing(t, DATA):
+def compute_warning_on_bushing(t, DATA, Bushings_mapping):
     Bushings = pd.DataFrame(columns=['Cap H1', 'Cap H2', 'Cap H3', 'Cap Y1', 'Cap Y2', 'Cap Y3',
                                      'tand H1', 'tand H2', 'tand H3', 'tand Y1', 'tand Y2', 'tand Y3'])
-    Bushings_mapping = {'Cap H1': 'BUSHING H1 Capacitance',
-                        'Cap H2': 'BUSHING H2 Capacitance',
-                        'Cap H3': 'BUSHING H3 Capacitance',
-                        'Cap Y1': 'BUSHING Y1 Capacitance',
-                        'Cap Y2': 'BUSHING Y2 Capacitance',
-                        'Cap Y3': 'BUSHING Y3 Capacitance',
-                        'tand H1': 'BUSHING H1 Tan delta',
-                        'tand H2': 'BUSHING H2 Tan delta',
-                        'tand H3': 'BUSHING H3 Tan delta',
-                        'tand Y1': 'BUSHING Y1 Tan delta',
-                        'tand Y2': 'BUSHING Y2 Tan delta',
-                        'tand Y3': 'BUSHING Y3 Tan delta'}
+    # Bushings_mapping = {'Cap H1': 'BUSHING H1 Capacitance',
+    #                     'Cap H2': 'BUSHING H2 Capacitance',
+    #                     'Cap H3': 'BUSHING H3 Capacitance',
+    #                     'Cap Y1': 'BUSHING Y1 Capacitance',
+    #                     'Cap Y2': 'BUSHING Y2 Capacitance',
+    #                     'Cap Y3': 'BUSHING Y3 Capacitance',
+    #                     'tand H1': 'BUSHING H1 Tan delta',
+    #                     'tand H2': 'BUSHING H2 Tan delta',
+    #                     'tand H3': 'BUSHING H3 Tan delta',
+    #                     'tand Y1': 'BUSHING Y1 Tan delta',
+    #                     'tand Y2': 'BUSHING Y2 Tan delta',
+    #                     'tand Y3': 'BUSHING Y3 Tan delta'}
     for col in Bushings.columns:
         Bushings[col] = DATA.loc[DATA.Measurement == Bushings_mapping[col], 'Value'].resample('0.5h').mean()
     print(Bushings)
@@ -544,8 +534,8 @@ def compute_warning_on_bushing(t, DATA):
     return Message
 
 
-def compute_warning_on_DGA(t, DATA):
-    DGA = prepare_DGA_df(DATA)
+def compute_warning_on_DGA(t, DATA, DGA_mapping):
+    DGA = prepare_DGA_df(DATA, DGA_mapping)
     DGA_last = DGA[(DGA.index >= (t - pd.Timedelta(days=1))) & (DGA.index <= t)]
     DGA_last['C2H2_State'] = DGA_last['C2H2'].apply(compute_acetylene_condition_state)
     DGA_last['C2H6_State'] = DGA_last['C2H6'].apply(compute_ethane_condition_state)
