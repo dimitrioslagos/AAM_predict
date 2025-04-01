@@ -148,6 +148,7 @@ def quantile_loss(q):
 
 
 def train_model_top_oil(X_train, y_train):
+    print(X_train)
     maxX = maxV[X_train.columns]
     # Instantiate the model
     input_shape = (X_train.shape[1],)  # Assuming X_train is your feature matrix
@@ -157,7 +158,6 @@ def train_model_top_oil(X_train, y_train):
     # Train the model
     history = model.fit(X_train / maxX, y_train / maxX['Top Oil Temperature'], epochs=50, verbose=0)
     # model.save('Models/Top_Oil')
-    # Create a SHAP explainer
     return model
 
 
@@ -416,12 +416,9 @@ def compute_normal_scenarios(DGA):
 
 def prepare_DGA_df(DATA, OLMS_mapping):
     DGA = pd.DataFrame(columns=['H2', 'CH4', 'C2H2', 'C2H6', 'C2H4'])
-    # OLMS_mapping = {'H2': 'TM8 0 H2inOil', 'CH4': 'TM8 0 CH4inOil', 'C2H2': 'TM8 0 C2H2inOil',
-    #                 'C2H6': 'TM8 0 C2H6inOil', 'C2H4': 'TM8 0 C2H4inOil'}
     for col in DGA.columns:
-        DGA[col] = DATA.loc[DATA.Measurement == OLMS_mapping[col], 'Value'].resample('0.5h').mean()
-    # CO2 = ATF3.loc[ATF3.Measurement == 'TM8 0 CO2inOil', 'Value'].resample('0.5h').mean()
-    # CO = ATF3.loc[ATF3.Measurement == 'TM8 0 COinOil', 'Value'].resample('0.5h').mean()
+        DGA[col] = DATA.loc[DATA.Measurement == OLMS_mapping[col], 'Value'].resample('30min').mean()
+
     return DGA
 
 
@@ -432,7 +429,10 @@ def prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping):
     #                 'Ambient Shade Temperature':'Ampient Shade',
     #                 'HV Current':'HV Load Current'}
     for col in OIL.columns:
-        OIL[col] = DATA.loc[DATA.Measurement == OLMS_DATA_top_oil_mapping[col], 'Value'].resample('0.5h').mean()
+        print(col)
+        print(OLMS_DATA_top_oil_mapping[col])
+        print(DATA.loc[DATA.Measurement == OLMS_DATA_top_oil_mapping[col], 'Value'])
+        OIL[col] = DATA.loc[DATA.Measurement == OLMS_DATA_top_oil_mapping[col], 'Value'].resample('30min').mean()
     return OIL
 
 
@@ -453,7 +453,7 @@ def data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping
 
 def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping):
     OIL = data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping)
-    train_ids = OIL.index[OIL.rolling('0.5h').count().sum(axis=1) == OIL.shape[1]]
+    train_ids = OIL.index[OIL.rolling('30min').count().sum(axis=1) == OIL.shape[1]]
     train_ids = train_ids[1:]
     Y = OIL.loc[train_ids, 'Top Oil Temperature']
     X = OIL.shift(1).loc[train_ids]
@@ -519,7 +519,7 @@ def compute_warning_on_bushing(t, DATA, Bushings_mapping):
     #                     'tand Y2': 'BUSHING Y2 Tan delta',
     #                     'tand Y3': 'BUSHING Y3 Tan delta'}
     for col in Bushings.columns:
-        Bushings[col] = DATA.loc[DATA.Measurement == Bushings_mapping[col], 'Value'].resample('0.5h').mean()
+        Bushings[col] = DATA.loc[DATA.Measurement == Bushings_mapping[col], 'Value'].resample('30min').mean()
     print(Bushings)
 
     Bushings_last = Bushings[(Bushings.index >= (t - pd.Timedelta(days=7))) & (Bushings.index <= t)]

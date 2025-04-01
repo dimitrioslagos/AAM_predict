@@ -11,18 +11,20 @@ if 'OLMS_DATA' not in st.session_state:
     st.session_state.OLMS_DATA = None
 
 if 'OLMS_DATA_top_oil_mapping' not in st.session_state:
-    st.session_state.OLMS_DATA_top_oil_mapping = {'Top Oil Temperature': None, 'Ambient Temperature': None, 'Ambient Shade Temperature': None, 'HV Current': None}
+    st.session_state.OLMS_DATA_top_oil_mapping = {'Top Oil Temperature': 'Top Oil Temp', 'Ambient Temperature': 'Ampient Sun', 'Ambient Shade Temperature': 'Ampient Shade', 'HV Current': 'HV Load Current'}
 
 if 'Loading_mapping' not in st.session_state:
-    st.session_state.Loading_mapping = {'Ambient Temperature': None, 'Ambient Shade Temperature': None, 'HV Current': None}
+    st.session_state.Loading_mapping = {'Ambient Temperature': 'Ampient Sun', 'Ambient Shade Temperature': 'Ampient Sun', 'HV Current': None}
 
 if 'DGA_mapping' not in st.session_state:
-    st.session_state.DGA_mapping = {'H2': None, 'CH4': None, 'C2H2': None, 'C2H6': None, 'C2H4': None}
+    st.session_state.DGA_mapping = {'H2': "TM8 0 H2inOil", 'CH4': "TM8 0 CH4inOil", 'C2H2': "TM8 0 C2H2inOil", 'C2H6': "TM8 0 C2H6", 'C2H4': "TM8 0 C2H4"}
 
 if 'Bushings_mapping' not in st.session_state:
-    st.session_state.Bushings_mapping = {'Cap H1': None, 'Cap H2': None, 'Cap H3': None, 'Cap Y1': None, 'Cap Y2': None,
-                                         'Cap Y3': None, 'tand H1': None, 'tand H2': None, 'tand H3': None,
-                                         'tand Y1': None, 'tand Y2': None, 'tand Y3': None}
+    st.session_state.Bushings_mapping = {'Cap H1': 'BUSHING H1 Capacitance', 'Cap H2': 'BUSHING H2 Capacitance', 'Cap H3': 'BUSHING H3 Capacitance',
+                                         'Cap Y1': 'BUSHING Y1 Capacitance',
+                                         'Cap Y2': 'BUSHING Y2 Capacitance',
+                                         'Cap Y3': 'BUSHING Y3 Capacitance', 'tand H1': 'BUSHING H1 Tan delta', 'tand H2': 'BUSHING H2 Tan delta', 'tand H3': 'BUSHING H3 Tan delta',
+                                         'tand Y1':  'BUSHING Y1 Tan delta', 'tand Y2': 'BUSHING Y2 Tan delta', 'tand Y3': 'BUSHING Y3 Tan delta'}
 
 if "file_uploaded" not in st.session_state:
     st.session_state.file_uploaded = False
@@ -47,6 +49,9 @@ if 'OIL_temp' not in st.session_state:
 
 if 'Probs' not in st.session_state:
     st.session_state.Probs = None
+
+if 'mapping_confirmed' not in st.session_state:
+    st.session_state.mapping_confirmed = False
 
 # Set the title of the Streamlit app
 st.title("Short Term Asset Management")
@@ -98,25 +103,28 @@ with tabs[0]:
         else:
             st.write("Please upload a file to see the content.")
 
+        confirm_button4 = st.button("Confirm Measurements Mapping", key="Yes")  # No need for a key since it's a single button
+        if confirm_button4:
+            st.session_state.mapping_confirmed = True
+            st.write("Mapping confirmed! Proceed to model training...")
+
         with tabs_historical[1]:
             if st.session_state.OLMS_DATA is not None:
-                # Do the mapping:
                 selected_options = {}
                 st.write(st.session_state.OLMS_DATA_top_oil_mapping)
                 for key in st.session_state.OLMS_DATA_top_oil_mapping.keys():
                     option = st.selectbox(
                         key + ":",
                         st.session_state.OLMS_DATA.Measurement.unique().tolist(),
-                        key=f"select_{key}"  # Unique key for each selectbox
+                        key=f"select_{key}", index=None  # Unique key for each selectbox
                     )
                     st.write("You selected:", option)
-                    st.session_state.OLMS_DATA_top_oil_mapping[key] = option
-                    if key in st.session_state.Loading_mapping:
-                        st.session_state.Loading_mapping[key] = option
                     selected_options[key] = option  # Store in new variable
                 confirm_button1 = st.button("Confirm Choices", key="Measurement Mapping")  # No need for a key since it's a single button
+                print(confirm_button1)
                 if confirm_button1:
                     st.session_state.button1_pressed = True
+                    st.session_state.OLMS_DATA_top_oil_mapping = selected_options
                     st.write("Selections confirmed:")
                     for key, value in selected_options.items():
                         st.write(f"**{key}:** {value}")
@@ -154,20 +162,22 @@ with tabs[0]:
                         key=f"select_dga_{key}"  # Unique key for each selectbox
                     )
                     st.write("You selected:", option)
-                    st.session_state.DGA_mapping[key] = option
                     selected_options[key] = option  # Store in new variable
                 confirm_button3 = st.button("Confirm Choices", key="DGA Mapping")  # No need for a key since it's a single button
                 if confirm_button3:
-                    st.session_state.button3_pressed = True
+                    st.session_state.DGA_mapping = option
                     st.write("Selections confirmed:")
                     for key, value in selected_options.items():
                         st.write(f"**{key}:** {value}")
 
 
     # train Oil temperature prediction model
-    if st.session_state.button1_pressed and st.session_state.button3_pressed and st.session_state.both_models_trained is False:  #this code runs every time the measurements mapping button is pressed
+    if st.session_state.mapping_confirmed and st.session_state.both_models_trained is False:  #this code runs every time the measurements mapping button is pressed
         if ('OLMS_DATA' in st.session_state) & ('model_oil' not in st.session_state):
+            st.write(st.session_state.DGA_mapping)
             X, Y = generate_training_data_oil(OLMS_DATA, st.session_state.OLMS_DATA_top_oil_mapping, st.session_state.DGA_mapping)
+            st.write(X)
+            st.write(Y)
             st.write('Training Oil Temperature Prediction Model...')
             model_oil, oil_threshold = prepare_model_top_oil(X, Y)
             st.write('Oil Temperature Prediction Model trained')
@@ -185,7 +195,7 @@ with tabs[0]:
             Y = st.session_state.get('Y', None)
             ##train Oil temperature prediction model
         if ('OLMS_DATA' in st.session_state) and ('current_models' not in st.session_state):
-            current_models = train_models_current(OLMS_DATA, st.session_state.Loading_mapping, horizon=6)
+            current_models = train_models_current(OLMS_DATA, st.session_state.OLMS_DATA_top_oil_mapping, horizon=6)
             st.write('Training Current Prediction Model...')
             model_oil, oil_threshold = prepare_model_top_oil(X, Y)
             st.write('Current Prediction Model trained')
