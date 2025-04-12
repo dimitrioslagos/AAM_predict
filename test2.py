@@ -9,8 +9,8 @@ from tf_keras import layers
 def prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping):
     OIL = pd.DataFrame(columns=['Top Oil Temperature', 'Ambient Temperature', 'HV Current'])
     for col in OIL.columns:
-        OIL[col] = DATA.loc[DATA.Measurement == OLMS_DATA_top_oil_mapping[col], 'Value'].resample('30min').mean()
-    return OIL
+        OIL[col] = DATA.loc[DATA.Measurement_Name == OLMS_DATA_top_oil_mapping[col], 'Value'].resample('30min').mean()
+    return OIL.dropna()
 
 
 def quantile_90_bins(OIL, current_bins, temperature_bins):
@@ -39,10 +39,10 @@ def quantile_90_bins(OIL, current_bins, temperature_bins):
 
 def data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping):
     OIL = prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping)
-    maxT=10 * np.ceil(OIL['Ambient Temperature'].max()/ 10)
-    minT=10 * np.floor(OIL['Ambient Temperature'].min()/ 10)
-    maxI=5 * np.ceil(OIL['HV Current'].max()/ 5)
-    minI=5 * np.floor(OIL['HV Current'].min()/ 5)
+    maxT= 10 * np.ceil(OIL['Ambient Temperature'].max()/ 10)
+    minT= 10 * np.floor(OIL['Ambient Temperature'].min()/ 10)
+    maxI= 5 * np.ceil(OIL['HV Current'].max()/ 5)
+    minI= 5 * np.floor(OIL['HV Current'].min()/ 5)
     current_bins = np.arange(minI, maxI + 5, 5)
     temperature_bins = np.arange(minT, maxT + 10, 10)
     OIL_filtered = quantile_90_bins(OIL, current_bins, temperature_bins)
@@ -54,8 +54,18 @@ def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping):
     OIL = data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping)
     train_ids = OIL.index[OIL.rolling('30min').count().sum(axis=1) == OIL.shape[1]]
     train_ids = train_ids[1:]
-    Y = OIL.loc[train_ids, 'Top Oil Temperature']
-    X = OIL.shift(1).loc[train_ids]
+    # Y = OIL.loc[train_ids, 'Top Oil Temperature']
+    # X = OIL.shift(1).loc[train_ids] # fernei to proigoumeno timestamp, mporei na min einai omws 30 minutes prin
+    # Find timestamps where t and t - 30 minutes both exist in the data
+    delta = pd.Timedelta('30min')
+    valid_timestamps = OIL.index.intersection(OIL.index + delta)
+
+    # Y at time t
+    Y = OIL.loc[valid_timestamps, 'Top Oil Temperature']
+
+    # X at time t - 30min
+    X = OIL.loc[valid_timestamps - delta]
+    X.index = Y.index
     return X, Y
 
 def loss_mse(y_true, y_pred):
@@ -124,13 +134,13 @@ def anomaly_detection_in_oil_temp(y_pred, y_true):
             anomalies.append(f"Anomaly detected from {anomaly_start_timestamp} to {anomaly_end_timestamp}")
 
     # Filter data for 30th August
-    single_day_data = MR.loc['2024-09-10']
+    #single_day_data = MR.loc['2024-09-10']
 
     # Plotting the MR, UCL, LCL, and MR mean for the 30th August
     plt.figure(figsize=(10, 6))
 
     # Plot MR values for the day (just one value in this case)
-    plt.plot(single_day_data.index, single_day_data, label="MR Values", color='blue', alpha=0.7, marker='o')
+    plt.plot(MR.index.values, MR.values, label="MR Values", color='blue', alpha=0.7, marker='o')
 
     # Plot Mean of MR
     plt.axhline(MRmean, color='green', linestyle='--', label="Mean of MR (Mean)")
@@ -141,9 +151,9 @@ def anomaly_detection_in_oil_temp(y_pred, y_true):
     # Plot Lower Control Limit (LCL)
     plt.axhline(LCL, color='orange', linestyle='--', label="LCL (Lower Control Limit)")
 
-    # Fill between LCL and UCL to indicate the control band area
-    plt.fill_between([single_day_data.index[0], single_day_data.index[0]], LCL, UCL, color='gray', alpha=0.2,
-                     label="Control Band")
+    # # Fill between LCL and UCL to indicate the control band area
+    # plt.fill_between([single_day_data.index[0], single_day_data.index[0]], LCL, UCL, color='gray', alpha=0.2,
+    #                  label="Control Band")
 
     # Adding labels, legend, and title
     plt.title('Mean, UCL, LCL, and MR Values for 2024-09-10', fontsize=16)
@@ -175,7 +185,7 @@ ATF8.drop(ATF8.index[ATF8.Logs=='SENSOR ERROR 1'],inplace=True)
 ATF8.drop(columns=['Logs'],inplace=True)
 
 # models = train_models_current(ATF3,horizon=6)+
-OLMS_DATA_top_oil_mapping = {'Top Oil Temperature': 'Top Oil Temp', 'Ambient Temperature': 'Ampient Sun', 'Ambient Shade Temperature': 'Ampient Shade', 'HV Current': 'HV Load Current'}
+OLMS_DATA_top_oil_mapping = {'Top Oil Temperature': 'TOP OIL TEMP', 'Ambient Temperature': 'AM.TEMP SUN', 'Ambient Shade Temperature': 'AM.TEMP SHADE', 'HV Current': 'HV CT'}
 
 DGA_mapping = {'H2': "TM8 0 H2inOil", 'CH4': "TM8 0 CH4inOil", 'C2H2': "TM8 0 C2H2inOil", 'C2H6': "TM8 0 C2H6", 'C2H4': "TM8 0 C2H4"}
 
@@ -192,11 +202,11 @@ ATF3.index = ATF3['Date']
 ATF3.drop(ATF3.index[ATF3.Logs=='SENSOR ERROR 1'], inplace=True)
 ATF3.drop(columns=['Logs'], inplace=True)
 
-X, Y = generate_training_data_oil(ATF8, OLMS_DATA_top_oil_mapping, DGA_mapping)
-X_test=X[X.index.month>=8]
-Y_test=Y[X.index.month>=8]
-X_train=X[X.index.month<8]
-Y_train=Y[X.index.month<8]
+X, Y = generate_training_data_oil(ATF3, OLMS_DATA_top_oil_mapping, DGA_mapping)
+X_test=X[(X.index.month>=3)&(X.index.day<=13)]
+Y_test=Y[(X.index.month>=3)&(X.index.day<=13)]
+X_train=X[(X.index.month<=2)|(X.index.month>=6)]
+Y_train=Y[(X.index.month<=2)|(X.index.month>=6)]
 
 maxV = {'Top Oil Temperature': 70, 'Ambient Temperature': 50, 'Ambient Shade Temperature': 50, 'HV Current': 300}
 maxV = pd.Series(maxV)
@@ -216,3 +226,5 @@ print(issues)
 print(errors)
 
 print('a')
+plt.plot(ATF3.loc[ATF3.Measurement_Name=='L1 Capacitance'].index.values, ATF3.loc[ATF3.Measurement_Name=='L1 Capacitance','Value'].values, label="MR Values", color='blue', alpha=0.7, marker='o')
+plt.show()

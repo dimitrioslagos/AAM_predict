@@ -454,6 +454,7 @@ def data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping
 def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping):
     OIL = data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping)
     train_ids = OIL.index[OIL.rolling('30min').count().sum(axis=1) == OIL.shape[1]]
+
     train_ids = train_ids[1:]
     Y = OIL.loc[train_ids, 'Top Oil Temperature']
     X = OIL.shift(1).loc[train_ids]
