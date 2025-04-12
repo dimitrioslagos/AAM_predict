@@ -49,6 +49,7 @@ def data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping
     OIL_filtered.dropna(inplace=True)
     return OIL_filtered
 
+
 def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping):
     OIL = data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping)
     train_ids = OIL.index[OIL.rolling('30min').count().sum(axis=1) == OIL.shape[1]]
@@ -123,7 +124,7 @@ def anomaly_detection_in_oil_temp(y_pred, y_true):
             anomalies.append(f"Anomaly detected from {anomaly_start_timestamp} to {anomaly_end_timestamp}")
 
     # Filter data for 30th August
-    single_day_data = MR.loc['2024-08-30']
+    single_day_data = MR.loc['2024-09-10']
 
     # Plotting the MR, UCL, LCL, and MR mean for the 30th August
     plt.figure(figsize=(10, 6))
@@ -145,7 +146,7 @@ def anomaly_detection_in_oil_temp(y_pred, y_true):
                      label="Control Band")
 
     # Adding labels, legend, and title
-    plt.title('Mean, UCL, LCL, and MR Values for 2024-08-30', fontsize=16)
+    plt.title('Mean, UCL, LCL, and MR Values for 2024-09-10', fontsize=16)
     plt.xlabel('Timestamp', fontsize=14)
     plt.ylabel('MR Value', fontsize=14)
     plt.legend(loc='upper left', fontsize=12)
@@ -193,8 +194,8 @@ ATF3.drop(columns=['Logs'], inplace=True)
 
 X, Y = generate_training_data_oil(ATF8, OLMS_DATA_top_oil_mapping, DGA_mapping)
 X_test=X[X.index.month>=8]
-X_train=X[X.index.month<8]
 Y_test=Y[X.index.month>=8]
+X_train=X[X.index.month<8]
 Y_train=Y[X.index.month<8]
 
 maxV = {'Top Oil Temperature': 70, 'Ambient Temperature': 50, 'Ambient Shade Temperature': 50, 'HV Current': 300}
@@ -213,3 +214,5 @@ print('R2:',r2_score(Y_test,ypred))
 issues, errors = anomaly_detection_in_oil_temp(ypred, Y_test)
 print(issues)
 print(errors)
+
+print('a')
