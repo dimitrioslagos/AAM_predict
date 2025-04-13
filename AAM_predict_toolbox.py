@@ -8,12 +8,9 @@ import plotly.express as px
 import os
 import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestRegressor
-
 maxV = {'Top Oil Temperature': 70, 'Ambient Temperature': 50, 'Ambient Shade Temperature': 50, 'HV Current': 300}
 maxV = pd.Series(maxV)
-
 threshold = {'Top Oil Temperature': 60}
-
 import scipy.stats as stats
 
 
@@ -30,8 +27,6 @@ def probability_to_exceed(value, mean, std):
 
     return pd.DataFrame(exceed_probability.reshape(1, 6), index=['Failure Probability (%)'], columns=z.index)
 
-
-###
 def html_future_oil_temp_plot(OIL_temp):
     # Create Plotly figure
     fig = go.Figure()
@@ -74,8 +69,6 @@ def html_future_oil_temp_plot(OIL_temp):
     #fig.show()
     return fig.to_html()
 
-
-# Function to generate error plot
 def html_error_plot(error, threshold):
     # Create Plotly figure
     fig = go.Figure()
@@ -96,14 +89,11 @@ def html_error_plot(error, threshold):
 
     return fig.to_html()
 
-
-# Function to display light based on boolean value
 def display_light(value):
     if value:  # True -> Yellow light
         return '<div style="width: 50px; height: 50px; background-color: yellow; border-radius: 50%;"></div>'
     else:  # False -> Green light
         return '<div style="width: 50px; height: 50px; background-color: green; border-radius: 50%;"></div>'
-
 
 def build_regression_model(input_shape):
     model = tf_keras.Sequential([
@@ -114,7 +104,6 @@ def build_regression_model(input_shape):
     ])
     return model
 
-
 def build_regression_model_I(input_shape):
     model = tf_keras.Sequential([
         layers.InputLayer(input_shape=input_shape),
@@ -124,11 +113,9 @@ def build_regression_model_I(input_shape):
     ])
     return model
 
-
 def loss_mse(y_true, y_pred):
     e = y_true - y_pred
     return tf.reduce_mean(e * e)
-
 
 def quantile_loss(q):
     """Creates a quantile loss function for a given quantile q.
@@ -146,7 +133,6 @@ def quantile_loss(q):
 
     return loss
 
-
 def train_model_top_oil(X_train, y_train):
     print(X_train)
     maxX = maxV[X_train.columns]
@@ -160,14 +146,12 @@ def train_model_top_oil(X_train, y_train):
     # model.save('Models/Top_Oil')
     return model
 
-
 def predict_quantiles(model, X, quantiles):
     predictions = []
     for q in quantiles:
         pred = np.percentile([tree.predict(X) for tree in model.estimators_], q * 100, axis=0)
         predictions.append(pred)
     return np.array(predictions).T
-
 
 def train_model_current(X_train, y_train):
     maxX = pd.Series(index=X_train.columns)
@@ -192,13 +176,11 @@ def train_model_current(X_train, y_train):
 
     return model
 
-
 def predict_I_value(model, X_test):
     quantiles = [0.5, 0.75, 0.9, 0.99]
     quantile_predictions = predict_quantiles(model, X_test, quantiles)
     quantile_df = pd.DataFrame(quantile_predictions, columns=[f'quantile_{q}' for q in quantiles])
     return quantile_df
-
 
 def train_models_current(DATA, Loading_mapping, horizon):
     models = []
@@ -206,7 +188,6 @@ def train_models_current(DATA, Loading_mapping, horizon):
         X, Y = generate_current_training_data(DATA, Loading_mapping, horizon=i)
         models.append(train_model_current(X, Y))
     return models
-
 
 def predict_Currents(models, DATA, Loading_mapping, horizon, t):
     ##
@@ -221,7 +202,6 @@ def predict_Currents(models, DATA, Loading_mapping, horizon, t):
         qs.loc[t + pd.Timedelta(hours=i), :] = df[qs.columns].values
 
     return qs
-
 
 def predict_oil_future(model_oil, models, DATA, OLMS_top_oil_mapping, Loading_mapping, DGA_mapping, t):
     horizon = len(models)
@@ -280,7 +260,6 @@ def predict_oil_future(model_oil, models, DATA, OLMS_top_oil_mapping, Loading_ma
                 OIL_temp.loc[OIL_temp.index[1:], 'max'] - OIL_temp.loc[OIL_temp.index[1:], 'mean']) / 3.4)
     return OIL_temp, Probs * 100
 
-
 def prepare_model_top_oil(X, Y):
     # Specify the directory path
     model = train_model_top_oil(X, Y)
@@ -290,7 +269,6 @@ def prepare_model_top_oil(X, Y):
     std_error = (Y - ypred.reshape(ypred.shape[0])).std()
     threshold = mean_error + 3 * std_error
     return model, threshold
-
 
 def predict_top_oil(X_test, y_test, model, threshold):
     # model = tf_keras.models.load_model('Models/Top_Oil',custom_objects={'loss_mse':  loss_mse})
@@ -321,8 +299,6 @@ def predict_T_bushing(model, X_test, y_test):
     fig.show()
     return 0
 
-
-# Function to compute the condition state based on H2 value
 def compute_hydrogen_condition_state(h2_value):
     if -0.01 <= h2_value <= 20.00:
         return 0
@@ -337,8 +313,6 @@ def compute_hydrogen_condition_state(h2_value):
     else:
         return 0  # Handle cases outside of the specified ranges, if needed
 
-
-# Function to compute the condition state based on CH4 value
 def compute_methane_condition_state(ch4_value):
     if -0.01 <= ch4_value <= 10.00:
         return 0
@@ -353,8 +327,6 @@ def compute_methane_condition_state(ch4_value):
     else:
         return None  # Handle cases outside the specified ranges, if needed
 
-
-# Function to compute the condition state based on C2H4 value
 def compute_ethylene_condition_state(c2h4_value):
     if -0.01 <= c2h4_value <= 10.00:
         return 0
@@ -369,8 +341,6 @@ def compute_ethylene_condition_state(c2h4_value):
     else:
         return 0  # Handle cases outside the specified ranges, if needed
 
-
-# Function to compute the condition state based on C2H6 value
 def compute_ethane_condition_state(c2h6_value):
     if -0.01 <= c2h6_value <= 10.00:
         return 0
@@ -385,8 +355,6 @@ def compute_ethane_condition_state(c2h6_value):
     else:
         return 0  # Handle cases outside the specified ranges, if needed
 
-
-# Function to compute the condition state based on C2H2 value
 def compute_acetylene_condition_state(c2h2_value):
     if -0.01 <= c2h2_value <= 1.00:
         return 0
@@ -401,7 +369,6 @@ def compute_acetylene_condition_state(c2h2_value):
     else:
         return 0
 
-
 def compute_normal_scenarios(DGA):
     DGA['C2H2_State'] = DGA['C2H2'].apply(compute_acetylene_condition_state)
     DGA['C2H6_State'] = DGA['C2H6'].apply(compute_ethane_condition_state)
@@ -412,7 +379,6 @@ def compute_normal_scenarios(DGA):
         'C2H2_State']
     ids = (SCORE / 120) <= 3
     return ids
-
 
 def prepare_DGA_df(DATA, OLMS_mapping):
     DGA = pd.DataFrame(columns=['H2', 'CH4', 'C2H2', 'C2H6', 'C2H4'])

@@ -125,9 +125,9 @@ def compute_normal_scenarios(DGA):
     DGA['C2H2_State'] = DGA['C2H2'].apply(compute_acetylene_condition_state)
     DGA['C2H6_State'] = DGA['C2H6'].apply(compute_ethane_condition_state)
     DGA['C2H4_State'] = DGA['C2H4'].apply(compute_ethylene_condition_state)
-    DGA['CH4_State'] = DGA['CH4'].apply(compute_methane_condition_state)
-    DGA['H2_State'] = DGA['H2'].apply(compute_hydrogen_condition_state)
-    SCORE = 50 * DGA['H2_State'] + 30 * (DGA['CH4_State'] + DGA['C2H4_State'] + DGA['C2H6_State']) + 120 * DGA[
+    #DGA['CH4_State'] = DGA['CH4'].apply(compute_methane_condition_state)
+    #DGA['H2_State'] = DGA['H2'].apply(compute_hydrogen_condition_state)
+    SCORE = 30 * (DGA['C2H4_State'] + DGA['C2H6_State']) + 120 * DGA[
         'C2H2_State']
     condition = (SCORE / 120) <= 3
 
@@ -137,7 +137,7 @@ def compute_normal_scenarios(DGA):
     return ids
 
 def prepare_DGA_df(DATA, OLMS_mapping):
-    DGA = pd.DataFrame(columns=['H2', 'CH4', 'C2H2', 'C2H6', 'C2H4'])
+    DGA = pd.DataFrame(columns=['C2H2', 'C2H6', 'C2H4'])
     for col in DGA.columns:
         DGA[col] = DATA.loc[DATA.Measurement == OLMS_mapping[col], 'Value'].resample('30min').mean()
 
@@ -257,12 +257,11 @@ def compute_warning_on_DGA(t, DATA, DGA_mapping):
     DGA_last['C2H2_State'] = DGA_last['C2H2'].apply(compute_acetylene_condition_state)
     DGA_last['C2H6_State'] = DGA_last['C2H6'].apply(compute_ethane_condition_state)
     DGA_last['C2H4_State'] = DGA_last['C2H4'].apply(compute_ethylene_condition_state)
-    DGA_last['CH4_State'] = DGA_last['CH4'].apply(compute_methane_condition_state)
-    DGA_last['H2_State'] = DGA_last['H2'].apply(compute_hydrogen_condition_state)
+    #DGA_last['CH4_State'] = DGA_last['CH4'].apply(compute_methane_condition_state)
+    #DGA_last['H2_State'] = DGA_last['H2'].apply(compute_hydrogen_condition_state)
     DGA_last = DGA_last.mean()
-    DGA_last['SCORE'] = 50 * DGA_last['H2_State'] + 30 * (
-                DGA_last['CH4_State'] + DGA_last['C2H4_State'] + DGA_last['C2H6_State']) + 120 * DGA_last['C2H2_State']
-    DGA_last.drop(index=['C2H2_State', 'C2H6_State', 'C2H4_State', 'CH4_State', 'H2_State'], inplace=True)
+    DGA_last['SCORE'] = 30 * (DGA_last['C2H4_State'] + DGA_last['C2H6_State']) + 120 * DGA_last['C2H2_State']
+    DGA_last.drop(index=['C2H2_State', 'C2H6_State', 'C2H4_State'], inplace=True)
     DGA = pd.DataFrame(index=['status'], columns=DGA_last.index)
     DGA.loc['status', :] = DGA_last.values.transpose()
     return DGA
@@ -274,7 +273,7 @@ def data_find_abnormal_DGA(DATA, DGA_mapping):
 
     return ids_not_normal
 
-def plot_anomalies(anomalies, MR, MRmean, UCL, LCL, output_dir="bushing_plots_ATF8"):
+def plot_anomalies(anomalies, MR, MRmean, UCL, LCL, output_dir="bushing_plots_ATF3"):
     os.makedirs(output_dir, exist_ok=True)
     for idx, anomaly in anomalies.iterrows():
         anomaly_start_timestamp = idx
@@ -298,8 +297,8 @@ def plot_anomalies(anomalies, MR, MRmean, UCL, LCL, output_dir="bushing_plots_AT
         plt.savefig(plot_filename)
         plt.close()
 
-def plot_DGA(alarms, output_dir="bushing_plots_ATF8"):
-    title = "DGA H2, CH4, C2H2, C2H6, C2H4 values and score"
+def plot_DGA(alarms, output_dir="bushing_plots_ATF3"):
+    title = "DGA C2H2, C2H6, C2H4 values and score"
     os.makedirs(output_dir, exist_ok=True)
     plt.figure(figsize=(12, 6))
     for column in alarms.columns:
@@ -342,7 +341,7 @@ def quantile_90_bins(OIL, current_bins, temperature_bins):
 
     return OIL, mask
 
-def plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF8"):
+def plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF3"):
     os.makedirs(output_dir, exist_ok=True)
     for date in anomalies.index:
         bushing_day_measurements = Bushing.loc[Bushing.index.date == date]
@@ -396,33 +395,39 @@ def plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF8")
 
 #main
 #read data
-ATF8 = pd.read_csv('QTMS_Data-2024-09-30_15-55-42_ATF8.csv', delimiter=';', low_memory=False)
-id1 = ATF8.Timestamp.str.contains('EET')
-id2 = ATF8.Timestamp.str.contains('EEST')
-T1 = pd.to_datetime(ATF8.loc[id1, 'Timestamp'], format='%m/%d/%y, %H:%M:%S EET')
-T2 = pd.to_datetime(ATF8.loc[id2, 'Timestamp'], format='%m/%d/%y, %H:%M:%S EEST')
-T = pd.concat((T1, T2))
-ATF8.index = T
-ATF8.drop(ATF8.index[ATF8.Logs=='SENSOR ERROR 1'], inplace=True)
-ATF8.drop(columns=['Logs'], inplace=True)
+ATF3 = pd.read_csv('atf_3_from_2024-09-30_data.csv', low_memory=False)
+ATF3['Date'] = pd.to_datetime(ATF3['Date'])
+ATF3=ATF3.sort_values(by=['Date', 'ID'])
+ATF3.index = ATF3['Date']
+ATF3.drop(ATF3.index[ATF3.Logs=='SENSOR ERROR 1'], inplace=True)
+ATF3.drop(columns=['Logs'], inplace=True)
+ATF3.rename(columns={'ID': 'Meas_ID', 'Date': 'Timestamp', 'Measurement_Name': 'Measurement', 'Phase': 'Units'}, inplace=True)
+
 
 #mappings
-OLMS_DATA_top_oil_mapping = {'Top Oil Temperature': 'Top Oil Temp', 'Ambient Temperature': 'Ampient Sun', 'Ambient Shade Temperature': 'Ampient Shade', 'HV Current': 'HV Load Current'}
+OLMS_DATA_top_oil_mapping = {'Top Oil Temperature': 'TOP OIL TEMP', 'Ambient Temperature': 'AM.TEMP SUN', 'Ambient Shade Temperature': 'AM.TEMP SHADE', 'HV Current': 'HV CT'}
 
-DGA_mapping = {'H2': "TM8 0 H2inOil", 'CH4': "TM8 0 CH4inOil", 'C2H2': "TM8 0 C2H2inOil", 'C2H6': "TM8 0 C2H6inOil", 'C2H4': "TM8 0 C2H4inOil"}
+DGA_mapping = {'C2H2': "TM8 0 C2H2inOil", 'C2H6': "TM8 0 C2H6inOil", 'C2H4': "TM8 0 C2H4inOil", 'CO2': "TM8 0 CO2inOil"}
 
-Bushings_mapping = {'Cap H1': 'BUSHING H1 Capacitance', 'Cap H2': 'BUSHING H2 Capacitance', 'Cap H3': 'BUSHING H3 Capacitance',
-                    'Cap Y1': 'BUSHING Y1 Capacitance',
-                    'Cap Y2': 'BUSHING Y2 Capacitance',
-                    'Cap Y3': 'BUSHING Y3 Capacitance', 'tand H1': 'BUSHING H1 Tan delta', 'tand H2': 'BUSHING H2 Tan delta', 'tand H3': 'BUSHING H3 Tan delta',
-                    'tand Y1':  'BUSHING Y1 Tan delta', 'tand Y2': 'BUSHING Y2 Tan delta', 'tand Y3': 'BUSHING Y3 Tan delta'}
+Bushings_mapping = {'Cap H1': 'H1 Capacitance',
+                    'Cap H2': 'H2 Capacitance',
+                    'Cap H3': 'H3 Capacitance',
+                    'Cap Y1': 'L1 Capacitance',
+                    'Cap Y2': 'L2 Capacitance',
+                    'Cap Y3': 'L3 Capacitance',
+                    'tand H1': 'H1 Tan delta',
+                    'tand H2': 'H2 Tan delta',
+                    'tand H3': 'H3 Tan delta',
+                    'tand Y1': 'L1 Tan delta',
+                    'tand Y2': 'L2 Tan delta',
+                    'tand Y3': 'L3 Tan delta'}
 
-#generate train test, includes cleaning
-X, Y, X_filtered, Y_filtered = generate_training_data_oil(ATF8, OLMS_DATA_top_oil_mapping)
-X_test=X[X.index.month>=8]
-Y_test=Y[X.index.month>=8]
-X_train=X_filtered[X_filtered.index.month<8]
-Y_train=Y_filtered[X_filtered.index.month<8]
+X, Y, X_filtered, Y_filtered = generate_training_data_oil(ATF3, OLMS_DATA_top_oil_mapping)
+test_size = int(len(X) * 0.3)
+X_train = X_filtered[:-test_size]
+Y_train = Y_filtered[X_train.index]
+X_test = X[-test_size:]
+Y_test = Y[X_test.index]
 
 #prepare_model_top_oil
 maxV = {'Top Oil Temperature': 70, 'Ambient Temperature': 50, 'Ambient Shade Temperature': 50, 'HV Current': 300}
@@ -440,23 +445,27 @@ print('MAPE:', mean_absolute_percentage_error(Y_test, ypred))
 print('R2:', r2_score(Y_test, ypred))
 
 #find anomalies with the model
-window = 3
+window = 2
 anomalies, MR, MRmean, UCL, LCL, Flags = anomaly_detection_in_oil_temp(ypred, Y_test, threshold, window)
+new_data = pd.DataFrame({
+    'value': ['', '','','','','','']
+}, index=pd.to_datetime(['2025-03-04', '2025-03-05','2025-03-06','2025-03-07','2025-03-08','2025-03-09','2025-03-10',]))
+new_data.index = new_data.index.date
+anomalies = pd.concat([anomalies, new_data])
 plot_anomalies(anomalies, MR, MRmean, UCL, LCL)
 
 #find ids marked abnormal by DGA
-ids = data_find_abnormal_DGA(ATF8, DGA_mapping)
+ids = data_find_abnormal_DGA(ATF3, DGA_mapping)
 anomalies_from_DGA=pd.DataFrame(ids)
-anomalies_from_DGA.set_index("Timestamp", inplace=True)
 
 #Run warning DGA for all test days
 start_date = pd.to_datetime('2024-08-01')
-unique_dates = pd.to_datetime(ATF8.index.date).unique()
+unique_dates = pd.to_datetime(ATF3.index.date).unique()
 unique_dates = unique_dates[unique_dates >= start_date]
 warnings_over_time = []
 for current_day in unique_dates:
     current_day_ts = pd.to_datetime(current_day)
-    alarm = compute_warning_on_DGA(current_day_ts, ATF8, DGA_mapping)
+    alarm = compute_warning_on_DGA(current_day_ts, ATF3, DGA_mapping)
     alarm["Date"] = current_day_ts.date()  # Add date as column
     warnings_over_time.append(alarm)
 Alarms_all_DGA = pd.concat(warnings_over_time).set_index("Date")
@@ -466,11 +475,11 @@ plot_DGA(Alarms_all_DGA)
 warnings_over_time = []
 for current_day in unique_dates:
     current_day_ts = pd.to_datetime(current_day)
-    alarm = compute_warning_on_bushing(current_day_ts, ATF8, Bushings_mapping)
+    alarm = compute_warning_on_bushing(current_day_ts, ATF3, Bushings_mapping)
     alarm["Date"] = current_day_ts.date()  # Add date as column
     warnings_over_time.append(alarm)
 Alarms_all_Bushing = pd.concat(warnings_over_time).set_index("Date")
-Bushing = prepare_Bushing_df(ATF8, Bushings_mapping)
-plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF8")
+Bushing = prepare_Bushing_df(ATF3, Bushings_mapping)
+plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF3")
 
 print('a')

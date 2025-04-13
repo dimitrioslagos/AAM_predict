@@ -307,6 +307,8 @@ ATF3.drop(ATF3.index[ATF3.Logs=='SENSOR ERROR 1'], inplace=True)
 ATF3.drop(columns=['Logs'], inplace=True)
 ATF3.rename(columns={'ID': 'Meas_ID', 'Date': 'Timestamp', 'Measurement_Name': 'Measurement', 'Phase': 'Units'}, inplace=True)
 
+
+#mappings
 OLMS_DATA_top_oil_mapping = {'Top Oil Temperature': 'TOP OIL TEMP', 'Ambient Temperature': 'AM.TEMP SUN', 'Ambient Shade Temperature': 'AM.TEMP SHADE', 'HV Current': 'HV CT'}
 
 DGA_mapping = {'C2H2': "TM8 0 C2H2inOil", 'C2H6': "TM8 0 C2H6inOil", 'C2H4': "TM8 0 C2H4inOil", 'CO2': "TM8 0 CO2inOil"}

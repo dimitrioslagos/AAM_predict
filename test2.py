@@ -12,7 +12,6 @@ def prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping):
         OIL[col] = DATA.loc[DATA.Measurement_Name == OLMS_DATA_top_oil_mapping[col], 'Value'].resample('30min').mean()
     return OIL.dropna()
 
-
 def quantile_90_bins(OIL, current_bins, temperature_bins):
     filtered_data = pd.DataFrame()
 
@@ -48,7 +47,6 @@ def data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping
     OIL_filtered = quantile_90_bins(OIL, current_bins, temperature_bins)
     OIL_filtered.dropna(inplace=True)
     return OIL_filtered
-
 
 def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping):
     OIL = data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping)
