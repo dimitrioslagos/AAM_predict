@@ -6,6 +6,8 @@ from pathlib import Path
 from AAM_predict_toolbox import predict_oil_future, html_future_oil_temp_plot, train_models_current, \
     compute_warning_on_bushing, compute_warning_on_DGA, display_light, generate_training_data_oil, \
     prepare_model_top_oil, predict_top_oil, html_error_plot
+from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String
+
 
 if 'OLMS_DATA' not in st.session_state:
     st.session_state.OLMS_DATA = None
