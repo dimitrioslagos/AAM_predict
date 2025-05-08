@@ -15,6 +15,7 @@ import tf_keras
 from sklearn.metrics import r2_score, mean_absolute_percentage_error, mean_squared_error
 from tf_keras import layers
 matplotlib.use('TkAgg')
+from scipy.stats import pearsonr
 
 def build_regression_model(input_shape):
     model = tf_keras.Sequential([
@@ -190,8 +191,8 @@ def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping):
 def anomaly_detection_in_oil_temp(y_pred, y_true, threshold, window):
     MRi = y_true - y_pred
     MR = MRi.diff().abs().dropna()
-    MRmean = MRi.mean()
-    MRstd = MRi.std()
+    MRmean = MR.mean()
+    MRstd = MR.std()
     UCL = MRmean + 3*MRstd
     LCL = MRmean - 3*MRstd
     Flags = (MR >= threshold).rolling(window=window).mean() >= 0.75
@@ -288,7 +289,7 @@ def plot_anomalies(anomalies, MR, MRmean, UCL, LCL, output_dir="bushing_plots_AT
         plt.fill_between(single_day_data.index, LCL, UCL, color='gray', alpha=0.2, label="Control Band")
         plt.title(f'Mean, UCL, LCL, and MR Values for {anomaly_date}', fontsize=16)
         plt.xlabel('Timestamp', fontsize=14)
-        plt.ylabel('MR Value', fontsize=14)
+        plt.ylabel('MR Value (°C) ', fontsize=14)
         plt.legend(loc='upper left', fontsize=12)
         plt.grid(True)
         plt.xticks(fontsize=12)
@@ -297,6 +298,25 @@ def plot_anomalies(anomalies, MR, MRmean, UCL, LCL, output_dir="bushing_plots_AT
         plot_filename = f"{output_dir}/anomaly_{anomaly_date}.png"
         plt.savefig(plot_filename)
         plt.close()
+
+    single_day_data = MR
+    plt.figure(figsize=(10, 6))
+    plt.plot(single_day_data.index, single_day_data, label="MR Values", color='blue', alpha=0.7, marker='o')
+    plt.axhline(MRmean, color='green', linestyle='--', label="Mean of MR (Mean)")
+    plt.axhline(UCL, color='red', linestyle='--', label="UCL (Upper Control Limit)")
+    plt.axhline(LCL, color='orange', linestyle='--', label="LCL (Lower Control Limit)")
+    plt.fill_between(single_day_data.index, LCL, UCL, color='gray', alpha=0.2, label="Control Band")
+    plt.title(f'Mean, UCL, LCL, and MR Values for testing data', fontsize=16)
+    plt.xlabel('Timestamp', fontsize=14)
+    plt.ylabel('MR Value (°C) ', fontsize=14)
+    plt.legend(loc='upper left', fontsize=12)
+    plt.grid(True)
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+    plt.tight_layout()
+    plot_filename = f"{output_dir}/anomaly.png"
+    plt.savefig(plot_filename)
+    plt.close()
 
 def plot_DGA(alarms, output_dir="bushing_plots_ATF8"):
     title = "DGA H2, CH4, C2H2, C2H6, C2H4 values and score"
@@ -358,7 +378,7 @@ def plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF8")
                 plt.plot(bushing_day_measurements.index, bushing_day_measurements[col], label=col)
             plt.title(f'Capacitance Y Bushings for {date}')
             plt.xlabel('Time')
-            plt.ylabel('Value')
+            plt.ylabel('Capacitance in pF')
             plt.legend()
             plt.grid(True)
             plt.tight_layout()
@@ -372,7 +392,7 @@ def plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF8")
                 plt.plot(bushing_day_measurements.index, bushing_day_measurements[col], label=col)
             plt.title(f'Capacitance H Bushings for {date}')
             plt.xlabel('Time')
-            plt.ylabel('Value')
+            plt.ylabel('Capacitance in pF')
             plt.legend()
             plt.grid(True)
             plt.tight_layout()
@@ -434,10 +454,19 @@ ypred = ypred.flatten()
 ypred = pd.Series(ypred, index=Y_test.index)
 
 #show evaluation metrics
+Y_test_for_evaluation=Y_filtered[X_filtered.index.month>=8]
+X_test_for_evaluation=X_filtered[X_filtered.index.month>=8]
+ypred_eval = model.predict(X_test_for_evaluation / maxX.values) * maxX['Top Oil Temperature']
+ypred_eval = ypred_eval.flatten()
+ypred_eval = pd.Series(ypred_eval, index=Y_test_for_evaluation.index)
 print('threshold:', threshold)
-print('MSE:', mean_squared_error(Y_test, ypred))
-print('MAPE:', mean_absolute_percentage_error(Y_test, ypred))
-print('R2:', r2_score(Y_test, ypred))
+print('MSE:', mean_squared_error(Y_test_for_evaluation, ypred_eval))
+print('MAPE:', mean_absolute_percentage_error(Y_test_for_evaluation, ypred_eval))
+print('R2:', r2_score(Y_test_for_evaluation, ypred_eval))
+
+pearson_corr, _ = pearsonr(Y_test_for_evaluation, ypred_eval)
+print('Pearson r:', pearson_corr)
+print('R2 from Pearson (r^2):', pearson_corr**2)
 
 #find anomalies with the model
 window = 3
