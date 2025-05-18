@@ -14,6 +14,42 @@ threshold = {'Top Oil Temperature': 60}
 import scipy.stats as stats
 
 
+def quantile_90_bins(OIL, current_bins, temperature_bins):
+    filtered_data = pd.DataFrame()
+
+    for i in range(len(current_bins) - 1):
+        for j in range(len(temperature_bins) - 1):
+            bin_data = OIL[
+                (OIL['HV Current'] >= current_bins[i]) &
+                (OIL['HV Current'] < current_bins[i + 1]) &
+                (OIL['Ambient Temperature'] >= temperature_bins[j]) &
+                (OIL['Ambient Temperature'] < temperature_bins[j + 1])
+                ]
+
+            if not bin_data.empty:  # Check if DataFrame is not empty (contains data)
+                Temp_quantile_005 = bin_data['Top Oil Temperature'].quantile(0.05)
+                Temp_quantile_095 = bin_data['Top Oil Temperature'].quantile(0.95)
+                bin_data = bin_data[
+                    (bin_data['Top Oil Temperature'] >= Temp_quantile_005) &
+                    (bin_data['Top Oil Temperature'] <= Temp_quantile_095)
+                    ]
+                filtered_data = pd.concat([filtered_data, bin_data])
+    filtered_data = filtered_data.sort_index()
+
+    return filtered_data
+
+def remove_extremes_OIL(DATA, OLMS_DATA_top_oil_mapping):
+    OIL = prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping)
+    maxT= 10 * np.ceil(OIL['Ambient Temperature'].max()/ 10)
+    minT= 10 * np.floor(OIL['Ambient Temperature'].min()/ 10)
+    maxI= 5 * np.ceil(OIL['HV Current'].max()/ 5)
+    minI= 5 * np.floor(OIL['HV Current'].min()/ 5)
+    current_bins = np.arange(minI, maxI + 5, 5)
+    temperature_bins = np.arange(minT, maxT + 10, 10)
+    OIL_filtered = quantile_90_bins(OIL, current_bins, temperature_bins)
+    OIL_filtered.dropna(inplace=True)
+    return OIL_filtered
+
 def probability_to_exceed(value, mean, std):
     # Calculate the z-score
     print(value, mean, std)
@@ -387,38 +423,45 @@ def prepare_DGA_df(DATA, OLMS_mapping):
 
     return DGA
 
+def prepare_bushing_capacitance_df(DATA, bushing_mapping):
+    Capacitances = pd.DataFrame(columns=['Cap H1', 'Cap H2', 'Cap H3', 'Cap Y1', 'Cap Y2','Cap Y3'])
+    for col in Capacitances.columns:
+        Capacitances[col] = DATA.loc[DATA.Measurement == bushing_mapping[col], 'Value'].resample('180min').mean()
+
+    return Capacitances
+
 
 def prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping):
     OIL = pd.DataFrame(columns=['Top Oil Temperature', 'Ambient Temperature', 'HV Current'])
-    # OLMS_mapping = {'Top Oil Temperature':'Top Oil Temp',
-    #                'Ambient Temperature':'Ampient Sun',
-    #                 'Ambient Shade Temperature':'Ampient Shade',
-    #                 'HV Current':'HV Load Current'}
     for col in OIL.columns:
-        print(col)
-        print(OLMS_DATA_top_oil_mapping[col])
-        print(DATA.loc[DATA.Measurement == OLMS_DATA_top_oil_mapping[col], 'Value'])
         OIL[col] = DATA.loc[DATA.Measurement == OLMS_DATA_top_oil_mapping[col], 'Value'].resample('30min').mean()
     return OIL
 
 
-def data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping):
-    OIL = prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping)
-    DGA = prepare_DGA_df(DATA, DGA_mapping)
-    ##
-    H2 = DGA['H2'].rolling(window=5).mean()
-    CH4 = DGA['CH4'].rolling(window=5).mean()
-    fig = px.line(H2, x=H2.index, y=H2, title="Sample Scatter Plot")
-    fig.add_scatter(x=CH4.index, y=CH4, mode='lines', name='Real', line=dict(color='black'))
+def data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping, bushings_mapping):
+    OIL = remove_extremes_OIL(DATA, OLMS_DATA_top_oil_mapping)
 
-    ids = compute_normal_scenarios(DGA)
-    OIL = OIL.loc[ids]
+    DGA = prepare_DGA_df(DATA, DGA_mapping).dropna()
+    if DGA.shape[0]>=1:
+        ids = compute_normal_scenarios(DGA)
+        OIL = OIL.loc[ids]
+
+    Capacitances = prepare_bushing_capacitance_df(DATA,bushing_mapping=bushings_mapping)
+    if Capacitances.shape[0]>=1:
+        Capacitances_perc_change = Capacitances.pct_change()
+        mask = (Capacitances_perc_change <= -0.10) | (Capacitances_perc_change >= 0.05)
+        issue_times = Capacitances.index[mask.any(axis=1)]
+        time_window = pd.Timedelta(hours=3)
+        mask2 = pd.Series(False, index=OIL.index)
+        for time in issue_times:
+            mask2 |= (OIL.index >= time - time_window) & (OIL.index <= time + time_window)
+        OIL = OIL.drop(index = OIL.index[mask2])
     OIL.dropna(inplace=True)
     return OIL
 
 
-def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping):
-    OIL = data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping)
+def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping,bushing_mapping):
+    OIL = data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping,bushing_mapping)
     train_ids = OIL.index[OIL.rolling('30min').count().sum(axis=1) == OIL.shape[1]]
 
     train_ids = train_ids[1:]

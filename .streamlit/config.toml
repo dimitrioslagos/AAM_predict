@@ -1,0 +1,11 @@
+[theme]
+primaryColor = "#808080"              # Grey
+backgroundColor = "#1E1E1E"           # Near-black
+secondaryBackgroundColor = "#1C1C1C"  # Dark grey for sidebar/boxes
+textColor = "#ADD8E6"                 # Light blue
+font = "sans serif"
+
+[server]
+headless = true
+port = 8501
+enableCORS = false
