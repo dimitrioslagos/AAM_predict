@@ -3,10 +3,15 @@ import streamlit.components.v1
 import pandas as pd
 import math
 from pathlib import Path
-from AAM_predict_toolbox import predict_oil_future, html_future_oil_temp_plot, train_models_current, \
+from AAM_predict_toolbox import  html_future_oil_temp_plot, train_q90_model, \
     compute_warning_on_bushing, compute_warning_on_DGA, display_light, generate_training_data_oil, \
-    prepare_model_top_oil, predict_top_oil, html_error_plot
+    prepare_model_top_oil, predict_top_oil, html_error_plot, train_mean_model, loss_mse
 from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String
+import numpy as np
+import os
+from datetime import datetime, timedelta, time
+import json
+import keras
 
 
 user = "'IPTO'"
@@ -15,11 +20,128 @@ server = '147.102.30.47'            # or IP address / named instance
 database = 'opentunity_dev'
 username = 'opentunity'
 password = '0pentunity44$$'
-
 conn_str = f"mssql+pyodbc://{username}:{password}@{server}/{database}?driver=ODBC+Driver+17+for+SQL+Server"
 engine = create_engine(conn_str)
 
-def import_data():
+def is_model_stale(metadata_path, days=7):
+
+    if not os.path.isfile(metadata_path):
+        return True  # No model or metadata found → needs retraining
+
+    with open(metadata_path) as f:
+        metadata = json.load(f)
+
+    trained_on = datetime.strptime(metadata["trained_on"], "%Y-%m-%d_%H-%M-%S")
+    return datetime.now() - trained_on > timedelta(days=days)
+
+def is_directory_empty(path):
+    return not os.listdir(path)
+
+
+def write_measurements_in_db(engine,meas_IDs,asset_name):
+    Data = st.session_state.OLMS_DATA
+    asset_ID = get_asset_ID(engine,asset_name)
+    all_data = []
+    for measurement in Data.Measurement.unique():
+        temp_df = Data[Data.Measurement == measurement].copy()
+        if temp_df.empty:
+            continue
+        #To be altered according to the user country
+        matching_keys1 = [k for k, v in st.session_state.Bushings_mapping.items() if v == measurement]
+        matching_keys2 = [k for k, v in st.session_state.OLMS_DATA_top_oil_mapping.items() if v == measurement]
+        matching_keys3 = [k for k, v in st.session_state.DGA_mapping.items() if v == measurement]
+        matching_key= matching_keys1+matching_keys2+matching_keys3
+        if len(matching_key)==1:
+            df_chunk = pd.DataFrame({
+                        'Timestamp': temp_df.index.tz_localize('Europe/Athens', ambiguous='NaT').tz_convert('UTC').tz_localize(None),  # Remove timezone info for SQL
+                        'Value': temp_df.Value.astype(float),
+                        'AssetID': [asset_ID] * len(temp_df),
+                        'MeasurementID': [meas_IDs[meas_IDs.Name == matching_key[0]].MeasurementID.values[0]] * len(temp_df)
+                    })
+            print(df_chunk)
+
+
+            existing_ts = pd.read_sql_query(
+                    f"""
+                    SELECT Timestamp FROM Measurements
+                    WHERE MeasurementID = {meas_IDs[meas_IDs.Name == matching_key[0]].MeasurementID.values[0]} AND AssetID = {asset_ID}
+                    AND Timestamp BETWEEN '{df_chunk['Timestamp'].min()}' AND '{df_chunk['Timestamp'].max()}'
+                    """,
+                    con=engine
+                )
+            df_chunk = df_chunk[~df_chunk['Timestamp'].isin(existing_ts['Timestamp'])]
+            all_data.append(df_chunk)
+        #
+     # # Combine everything
+    final_df = pd.concat(all_data, ignore_index=True)
+    final_df['Value'] = pd.to_numeric(final_df['Value'], errors='coerce')
+    final_df = final_df[np.isfinite(final_df['Value'])]
+    print(final_df)
+    #
+    # Drop invalid timestamps (just in case)
+    final_df = final_df.dropna(subset=['Timestamp'])
+
+    # Insert once
+    final_df.to_sql('Measurements', con=engine, if_exists='append', index=False, chunksize=50000)
+
+def get_measurements_IDs(engine):
+
+    measurement_IDS = pd.read_sql("SELECT MeasurementID,Name FROM MeasurementTypes", con=engine)
+    return measurement_IDS
+
+def get_asset_ID(engine,asset_name):
+    asset_ID = pd.read_sql("SELECT AssetID FROM Assets where AssetName="+"'"+asset_name+"'", con=engine)
+    return asset_ID.values[0][0]
+
+def check_file(uploaded_file):
+    try:
+        # Try parsing the file and Timestamp column
+        OLMS_DATA = pd.read_csv(
+                uploaded_file,
+                delimiter=';',
+                parse_dates=['Timestamp'],
+                dayfirst=False,  # or True if your dates are D/M/Y
+                low_memory=False
+            )
+
+        # Validate required columns exist
+        required_columns = {'Timestamp', 'Measurement', 'Value'}
+        if not required_columns.issubset(OLMS_DATA.columns):
+            st.error("❌ CSV must contain columns: Timestamp, Measurement, Value")
+        else:
+            # Validate column types
+            is_valid = True
+            errors = []
+
+        # Check Timestamp parsed correctly
+        if not pd.api.types.is_datetime64_any_dtype(OLMS_DATA['Timestamp']):
+            is_valid = False
+            errors.append("Timestamp column is not a valid datetime.")
+
+        # Check Measurement is string (object)
+        if not pd.api.types.is_object_dtype(OLMS_DATA['Measurement']):
+            is_valid = False
+            errors.append("Measurement column must be of string type.")
+
+        # Check Value is float-compatible
+        try:
+            OLMS_DATA['Value'] = OLMS_DATA['Value'].astype(float)
+        except ValueError:
+            is_valid = False
+            errors.append("Value column must contain only numeric (float) values.")
+
+        if is_valid:
+            st.success("✅ File format is valid!")
+            st.session_state['uploaded_file'] = uploaded_file.name
+                # Proceed with rest of the app using OLMS_DATA
+        else:
+            for err in errors:
+                st.error(f"❌ {err}")
+
+    except Exception as e:
+        st.error(f"❌ Failed to load file: {e}")
+
+def import_data(assets,measurements_IDs):
     # Define the tabs
     tabs_historical = st.tabs(["File Upload"])
     with tabs_historical[0]:
@@ -29,8 +151,12 @@ def import_data():
         # File uploader
         uploaded_file = st.file_uploader("Choose a file", type=["csv"], key=1)
 
+        st.session_state.asset = st.selectbox("Asset:",
+                                       assets.AssetName,
+                                        key=f"select_asset", index=None  # Unique key for each selectbox
+                                    )
         # Process the file after it's uploaded
-        if uploaded_file is not None:
+        if (uploaded_file is not None)&(st.session_state.asset is not None):
             if 'uploaded_file' not in st.session_state or st.session_state['uploaded_file'] != uploaded_file.name:
                 if uploaded_file is not None:
                     st.session_state['uploaded_file'] = uploaded_file.name
@@ -120,29 +246,22 @@ def import_data():
             if confirm_button4:
                 st.session_state.mapping_confirmed = True
                 st.write("Mapping confirmed! Updating Database...")
+                write_measurements_in_db(engine,measurements_IDs,st.session_state.asset)
 
 
-def train_top_oil_anomaly_detection_model():
-    if ('OLMS_DATA' in st.session_state):
-        print(st.session_state.OLMS_DATA.head())
-        X, Y = generate_training_data_oil(st.session_state.OLMS_DATA,
-                                                  st.session_state.OLMS_DATA_top_oil_mapping,
-                                                  st.session_state.DGA_mapping, st.session_state.Bushings_mapping)
+def read_data_from_DB(asset_ID, engine):
+    data = pd.read_sql_query( f"""
+                SELECT * FROM Measurements
+                WHERE AssetID = {asset_ID}
+                """,
+                con=engine)
+    return data
 
-        st.write('Training Oil Temperature Prediction Model...')
-        model_oil, oil_threshold = prepare_model_top_oil(X, Y)
-        st.write('Oil Temperature Prediction Model trained')
-        st.session_state['model_oil'] = model_oil
-        st.session_state['oil_threshold'] = oil_threshold
-        # Only for GA presentation
-        st.session_state['X'] = X
-        st.session_state['Y'] = Y
-    else:
-        st.write('Oil Temperature Prediction Model already trained')
-        oil_threshold = st.session_state.get('oil_threshold', None)
-        model_oil = st.session_state.get('model_oil', None)
-        X = st.session_state.get('X', None)
-        Y = st.session_state.get('Y', None)
+def train_top_oil_anomaly_detection_model(Data,top_oil_mapping,DGA_mapping,Bushings_mapping):
+    X, Y = generate_training_data_oil(Data,top_oil_mapping,DGA_mapping, Bushings_mapping)
+    model_oil, oil_threshold = prepare_model_top_oil(X, Y)
+    #Store model and metadata
+    return model_oil, oil_threshold
 
 
 def get_assets_of_user(user):
@@ -151,6 +270,109 @@ def get_assets_of_user(user):
     # Read the result into a DataFrame
     user_assets = pd.read_sql(query, con=engine)
     return user_assets
+
+
+def train_anomaly_detection_model_start(asset,measurements_IDs):
+    Data = read_data_from_DB(asset['AssetID'], engine)
+    for meas_id in Data.MeasurementID.unique().tolist():
+        Data.loc[Data.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+    Data.index = pd.DatetimeIndex(Data.Timestamp)
+    Data.drop(columns=['AssetID','Timestamp'],inplace=True)
+    Data = Data.rename(columns={'MeasurementID': 'Measurement'})
+    DGA_mapping = {'H2': "", 'CH4': "", 'C2H2': "", 'C2H6': "", 'C2H4': ""}
+    for key in DGA_mapping.keys():
+        if key in Data.Measurement.unique().tolist():
+            DGA_mapping[key]=key
+        else:
+            DGA_mapping[key]=None
+
+    Bushings_mapping = {'Capacitance HV1': '', 'Capacitance HV2': '',
+                                'Capacitance HV3': '','Capacitance LV1': '',
+                                'Capacitance LV2': '', 'Capacitance LV3': '',
+                                'tand HV1': '', 'tand HV2': '', 'tand HV3': '',
+                                             'tand LV1':  '', 'tand LV2': '', 'tand LV3': ''}
+    for key in Bushings_mapping.keys():
+        if key in Data.Measurement.unique().tolist():
+            Bushings_mapping[key]=key
+        else:
+            Bushings_mapping[key]=None
+    top_oil_mapping={'Top Oil Temperature': '', 'Ambient Temperature': '',
+                             'HV Current': ''}
+    for key in top_oil_mapping.keys():
+        if key in Data.Measurement.unique().tolist():
+            top_oil_mapping[key]=key
+        else:
+            top_oil_mapping[key]=None
+        if any(value is None for value in top_oil_mapping.values()):
+            continue
+        model, threshold = train_top_oil_anomaly_detection_model(Data,top_oil_mapping,DGA_mapping,Bushings_mapping)
+        # Save with timestamp
+        train_date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        model_dir = f"models/top_oil_anomaly/{asset['AssetName']}.h5"
+        model.save(model_dir)
+        metadata = {
+            "trained_on": train_date,
+            "threshold": threshold,
+                }
+        with open(f"models/top_oil_anomaly/{asset['AssetName']}_metadata.json", "w") as f:
+            json.dump(metadata, f, indent=4)
+
+
+
+def train_q90_model_start(asset,measurements_IDs):
+    Data = read_data_from_DB(asset['AssetID'], engine)
+    for meas_id in Data.MeasurementID.unique().tolist():
+        Data.loc[Data.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+    Data.index = pd.DatetimeIndex(Data.Timestamp)
+    Data.drop(columns=['AssetID','Timestamp'],inplace=True)
+    Data = Data.rename(columns={'MeasurementID': 'Measurement'})
+    if Data.shape[0]>=24*30*5:
+        model = train_q90_model(Data)
+        train_date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        model_dir = f"models/oil_temp_forecast/{asset['AssetName']}_90.keras"
+        os.makedirs(os.path.dirname(model_dir), exist_ok=True)
+        model.save(model_dir)
+        metadata = {
+                "trained_on": train_date,
+                    }
+        with open(f"models/oil_temp_forecast/{asset['AssetName']}_90_metadata.json", "w") as f:
+            json.dump(metadata, f, indent=4)
+
+
+def train_q50_model_start(asset,measurements_IDs):
+    Data = read_data_from_DB(asset['AssetID'], engine)
+    for meas_id in Data.MeasurementID.unique().tolist():
+        Data.loc[Data.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+    Data.index = pd.DatetimeIndex(Data.Timestamp)
+    Data.drop(columns=['AssetID','Timestamp'],inplace=True)
+    Data = Data.rename(columns={'MeasurementID': 'Measurement'})
+    if Data.shape[0]>=24*30*5:
+        model = train_mean_model(Data)
+        train_date = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        model_dir = f"models/oil_temp_forecast/{asset['AssetName']}_50.keras"
+        os.makedirs(os.path.dirname(model_dir), exist_ok=True)
+        model.save(model_dir)
+        metadata = {
+                "trained_on": train_date,
+                    }
+        with open(f"models/oil_temp_forecast/{asset['AssetName']}_50_metadata.json", "w") as f:
+            json.dump(metadata, f, indent=4)
+
+
+def retrain_stale_models(assets,measurements_IDs):
+    for id, asset in assets.iterrows():
+        if is_model_stale('models/top_oil_anomaly/'+asset.AssetName+'_metadata.json',days=7):
+            train_anomaly_detection_model_start(asset,measurements_IDs)
+        if is_model_stale('models/oil_temp_forecast/'+asset.AssetName+'_90_metadata.json',days=7):
+            train_q90_model_start(asset,measurements_IDs)
+        if is_model_stale('models/oil_temp_forecast/'+asset.AssetName+'_50_metadata.json',days=7):
+            train_q50_model_start(asset,measurements_IDs)
+
+
+assets = get_assets_of_user(user)
+measurements_IDs = get_measurements_IDs(engine)
+retrain_stale_models(assets,measurements_IDs)
+print('a')
 
 if 'OLMS_DATA' not in st.session_state:
     st.session_state.OLMS_DATA = None
@@ -164,12 +386,18 @@ if 'Loading_mapping' not in st.session_state:
 if 'DGA_mapping' not in st.session_state:
     st.session_state.DGA_mapping = {'H2': "", 'CH4': "", 'C2H2': "", 'C2H6': "", 'C2H4': ""}
 
+if 'asset' not in st.session_state:
+    st.session_state.asset = None
+
 if 'Bushings_mapping' not in st.session_state:
-    st.session_state.Bushings_mapping = {'Cap H1': '', 'Cap H2': '', 'Cap H3': '',
-                                         'Cap Y1': '',
-                                         'Cap Y2': '',
-                                         'Cap Y3': '', 'tand H1': '', 'tand H2': '', 'tand H3': '',
-                                         'tand Y1':  '', 'tand Y2': '', 'tand Y3': ''}
+    st.session_state.Bushings_mapping = {'Capacitance HV1': '', 'Capacitance HV2': '', 'Capacitance HV3': '',
+                                         'Capacitance LV1': '',
+                                         'Capacitance LV2': '',
+                                         'Capacitance LV3': '', 'tand HV1': '', 'tand HV2': '', 'tand HV3': '',
+                                         'tand LV1':  '', 'tand LV2': '', 'tand LV3': ''}
+
+
+
 
 if "file_uploaded" not in st.session_state:
     st.session_state.file_uploaded = False
@@ -193,12 +421,12 @@ if 'mapping_confirmed' not in st.session_state:
 
 
 #1st task. Read if there are any assets register for the user
-assets = get_assets_of_user(user)
+
 
 
 # Set the title of the Streamlit app
 if assets.shape[0] > 0:
-    tab = st.sidebar.radio("Short Term Asset Management", ["Home", "Import Historical Logs", "Online Dashboard"])
+    tab = st.sidebar.radio("Short Term Asset Management", ["Home", "Import Historical Logs", "Historical Data Dashboard"])
     st.session_state.assets = assets
 else:
     tab = st.sidebar.radio("Navigation", ["Home"])
@@ -216,11 +444,127 @@ def home_tab():
 if tab=='Home':
     home_tab()
 if tab == "Import Historical Logs":
-    import_data()
+    import_data(assets,measurements_IDs)
     if st.session_state.mapping_confirmed:
         if st.button("Update Machine Learning Models", key="ML Update"):
-            train_top_oil_anomaly_detection_model()
+            if st.session_state.asset is not None:
+                for id, asset in assets[assets.AssetName==st.session_state.asset].iterrows():
+                    train_anomaly_detection_model_start(asset,measurements_IDs)
+                    train_q50_model_start(asset,measurements_IDs)
+                    train_q90_model_start(asset,measurements_IDs)
+if tab == "Historical Data Dashboard":
+    timestamps = pd.date_range(start="2025-01-01", end="2025-01-10", freq="H")
+    st.sidebar.header("Select Time Period")
 
+    start_date = st.sidebar.date_input("Start date", timestamps[0].date())
+    start_time = st.sidebar.time_input("Start time", time(0, 0))
+
+    end_date = st.sidebar.date_input("End date", timestamps[-1].date())
+    end_time = st.sidebar.time_input("End time", time(23, 59))
+
+    # Combine into datetime objects
+    start_dt = datetime.combine(start_date, start_time)
+    end_dt = datetime.combine(end_date, end_time)
+    asset =  st.selectbox("Asset:",
+                                       assets.AssetName,
+                                        key=f"select_asset", index=None  # Unique key for each selectbox
+                                    )
+    print(assets[assets.AssetName==asset])
+    for id, asset_i in assets[assets.AssetName==asset].iterrows():
+        Data = read_data_from_DB(asset_i['AssetID'], engine)
+        Data = Data[(Data.Timestamp>=start_dt)&(Data.Timestamp<=end_dt)]
+        ########################################################################
+        ##Calculate DGA Scores##
+        DGA_mapping = {'H2': "H2", 'CH4': "CH4", 'C2H2': "C2H2", 'C2H6': "C2H6", 'C2H4': "C2H4"}
+        dga_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in DGA_mapping.keys()]
+        Data_DGA = Data[Data["MeasurementID"].isin(dga_ids)]
+        for meas_id in dga_ids:
+            Data_DGA.loc[Data_DGA.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+        Data_DGA = Data_DGA.rename(columns={'MeasurementID': 'Measurement'})
+        Data_DGA.index = pd.DatetimeIndex(Data_DGA.Timestamp)
+        Data_DGA.drop(columns = ['Timestamp','AssetID'],inplace=True)
+        DGA_flag = compute_warning_on_DGA(Data_DGA)
+        st.write("📉 DGA Scores:")
+        st.dataframe(DGA_flag)
+        ########################################################################
+        ##Calculate Bushing Flags##
+        Bushings_mapping = {'Capacitance HV1': 'Capacitance HV1', 'Capacitance HV2': 'Capacitance HV2',
+                                'Capacitance HV3': 'Capacitance HV3','Capacitance LV1': 'Capacitance LV1',
+                                'Capacitance LV2': 'Capacitance LV2', 'Capacitance LV3': 'Capacitance LV3',
+                                'tand HV1': 'tand HV1', 'tand HV2': 'tand HV2', 'tand HV3': 'tand HV3',
+                                             'tand LV1':  'tand LV1', 'tand LV2': 'tand LV2', 'tand LV3': 'tand LV3'}
+        Bushings_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows()
+                        if meas['Name'] in Bushings_mapping.keys()]
+        Data_Bushings = Data[Data["MeasurementID"].isin(Bushings_ids)]
+        for meas_id in Bushings_ids:
+            Data_Bushings.loc[Data_Bushings.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+        Data_Bushings = Data_Bushings.rename(columns={'MeasurementID': 'Measurement'})
+        # Pivot the data
+        Data_Bushings = Data_Bushings.pivot(index="Timestamp", columns="Measurement", values="Value")
+        Data_Bushings = Data_Bushings.sort_index().sort_index(axis=1)
+        df = Data_Bushings.copy()
+
+        cap_cols = [col for col in df.columns if "Capacitance" in col]
+        cap_df = df[cap_cols].copy()
+
+
+        # Step 1: Calculate previous day's daily mean (used for comparison)
+        daily_mean = cap_df.resample("D").mean()
+
+        # Step 2: Resample into 2-hour means
+        resampled_4h = cap_df.resample("4H").mean()
+
+        # Step 3: Get previous day's mean for each 2-hour window
+        # Create a column with the date of the *previous* day
+        prev_day_index = resampled_4h.index - pd.Timedelta(days=1)
+        prev_day_means = daily_mean.reindex(prev_day_index.date)
+
+        # Because index mismatch on datetime vs. date, align it
+        prev_day_means.index = resampled_4h.index  # force same shape for element-wise math
+
+        # Step 4: Calculate percentage change
+        pct_change = (resampled_4h - prev_day_means) / prev_day_means * 100
+
+        # Step 5: Flag large deviations
+        alerts = (pct_change < -10) | (pct_change > 5)
+
+        # Optional: Get only the rows where any alert is triggered
+        alerted_changes = pct_change[alerts.any(axis=1)]
+
+        # Display result
+        st.write("🚨 Bushing Capacitance Alerts")
+        st.dataframe(alerted_changes.style.format("{:.2f}%"))
+        ########################################################################
+        ########################################################################
+        oil_anomaly_detection_mapping = {'Top Oil Temperature': 'Top Oil Temperature', 'Ambient Temperature': 'Ambient Temperature',
+                                  'HV Current': 'HV Current'}
+        oil_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in oil_anomaly_detection_mapping.keys()]
+        Data_oil = Data[Data["MeasurementID"].isin(oil_ids)]
+        for meas_id in oil_ids:
+            Data_oil.loc[Data_oil.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+        Data_oil = Data_oil.rename(columns={'MeasurementID': 'Measurement'})
+        Data_oil.index = pd.DatetimeIndex(Data_oil.Timestamp)
+        Data_oil = Data_oil.pivot(index="Timestamp", columns="Measurement", values="Value")
+        Data_oil = Data_oil.resample('60min').mean()
+        print(Data_oil)
+        # model = keras.models.load_model(
+        #         'models/top_oil_anomaly/' + asset + '.h5'
+        #     )
+        model = keras.models.load_model('models/top_oil_anomaly/' + asset + '.h5', compile=False)
+        with open('models/top_oil_anomaly/'+asset+'_metadata.json', 'r') as f:
+            config = json.load(f)
+        threshold = config['threshold']
+        print("Threshold:", threshold)
+        train_ids = Data_oil.index[Data_oil.rolling('60min').count().sum(axis=1) == Data_oil.shape[1]]
+        train_ids = train_ids[1:]
+        Y = Data_oil.loc[train_ids, 'Top Oil Temperature']
+        X = Data_oil.shift(1).loc[train_ids]
+        X= X.dropna(axis=0)
+        Y = Y.loc[X.index]
+        alarms, errors = predict_top_oil(X,Y,model, threshold)
+
+        st.write("🚨Top oil Temperature anomalies")
+        st.dataframe(alarms[alarms].style.format("{:.2f}%"))
 
 
 # # Define the tabs

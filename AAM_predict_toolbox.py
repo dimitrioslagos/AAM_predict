@@ -7,11 +7,18 @@ from tf_keras import layers
 import plotly.express as px
 import os
 import plotly.graph_objects as go
-from sklearn.ensemble import RandomForestRegressor
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense
+from sklearn.metrics import r2_score,mean_squared_error,mean_absolute_percentage_error
+import tensorflow.keras.backend as K
+import keras_tuner as kt
+from tensorflow.keras.optimizers import Adam
+import scipy.stats as stats
+
 maxV = {'Top Oil Temperature': 70, 'Ambient Temperature': 50, 'Ambient Shade Temperature': 50, 'HV Current': 300}
 maxV = pd.Series(maxV)
 threshold = {'Top Oil Temperature': 60}
-import scipy.stats as stats
+
 
 
 def quantile_90_bins(OIL, current_bins, temperature_bins):
@@ -39,7 +46,10 @@ def quantile_90_bins(OIL, current_bins, temperature_bins):
     return filtered_data
 
 def remove_extremes_OIL(DATA, OLMS_DATA_top_oil_mapping):
-    OIL = prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping)
+    Data_oil = DATA[DATA["Measurement"].isin(OLMS_DATA_top_oil_mapping.keys())]
+    Data_oil['Timestamp'] = Data_oil.index
+    OIL = Data_oil.pivot(index="Timestamp", columns="Measurement", values="Value")
+
     maxT= 10 * np.ceil(OIL['Ambient Temperature'].max()/ 10)
     minT= 10 * np.floor(OIL['Ambient Temperature'].min()/ 10)
     maxI= 5 * np.ceil(OIL['HV Current'].max()/ 5)
@@ -176,125 +186,89 @@ def train_model_top_oil(X_train, y_train):
     input_shape = (X_train.shape[1],)  # Assuming X_train is your feature matrix
     model = build_regression_model(input_shape)
     # Compile the model
-    model.compile(optimizer='adam', loss=loss_mse)
+    model.compile(optimizer='adam', loss='mse')
     # Train the model
     history = model.fit(X_train / maxX, y_train / maxX['Top Oil Temperature'], epochs=50, verbose=0)
-    # model.save('Models/Top_Oil')
     return model
 
-def predict_quantiles(model, X, quantiles):
-    predictions = []
-    for q in quantiles:
-        pred = np.percentile([tree.predict(X) for tree in model.estimators_], q * 100, axis=0)
-        predictions.append(pred)
-    return np.array(predictions).T
+def create_multistep_sequences(X, y, input_len=24, output_len=6):
+    Xs, ys = [], []
+    for i in range(len(X) - input_len - output_len):
+        Xs.append(X[i:i+input_len].values)
+        ys.append(y[i+input_len:i+input_len+output_len].values.flatten())
+    return np.array(Xs), np.array(ys)
 
-def train_model_current(X_train, y_train):
-    maxX = pd.Series(index=X_train.columns)
-    for i in maxX.index:
-        if 'HV Current' in i:
-            maxX[i] = maxV['HV Current']
-        elif i == 'h':
-            maxX[i] = 23
-        elif i == 'm':
-            maxX[i] = 12
-        elif i == 'd':
-            maxX[i] = 6
-        else:
-            maxX[i] = maxV[i]
-    # Instantiate the model
-    if y_train.isna().any():
-        X_train.drop(index=y_train.index[y_train.isna()], inplace=True)
-        y_train.drop(index=y_train.index[y_train.isna()], inplace=True)
+def quantile_loss(q):
+    def loss(y_true, y_pred):
+        e = y_true - y_pred
+        return K.mean(K.maximum(q * e, (q - 1) * e), axis=-1)
+    return loss
 
-    model = RandomForestRegressor(n_estimators=100, random_state=42)
-    model.fit(X_train, y_train)
+
+def train_q90_model(Data):
+    df = Data.pivot(columns='Measurement', values='Value')
+
+    # # Select features and target
+    features = ['HV Current', 'Ambient Temperature']  # adjust as needed
+    target = 'Top Oil Temperature'
+    df = df[features+[target]]
+    df = df.resample('60min').mean()
+    df.dropna(inplace=True)
+
+    # # Normalize features
+    X_scaled = df[features]/maxV[features]
+    y_scaled = df[target]/maxV[target]
+    X_seq, y_seq = create_multistep_sequences(X_scaled, y_scaled, input_len=24, output_len=6)
+
+    model = Sequential([
+        LSTM(128, input_shape=(X_seq.shape[1], X_seq.shape[2])),
+        Dense(32),  # 6 output values, one per hour
+        Dense(6)  # 6 output values, one per hour
+    ])
+    model.compile(optimizer='adam', loss=quantile_loss(0.9))
+    #
+    model.summary()
+    #
+    model.fit(X_seq, y_seq, epochs=40, batch_size=32, validation_split=0.2)
+
 
     return model
 
-def predict_I_value(model, X_test):
-    quantiles = [0.5, 0.75, 0.9, 0.99]
-    quantile_predictions = predict_quantiles(model, X_test, quantiles)
-    quantile_df = pd.DataFrame(quantile_predictions, columns=[f'quantile_{q}' for q in quantiles])
-    return quantile_df
 
-def train_models_current(DATA, Loading_mapping, horizon):
-    models = []
-    for i in range(1, horizon + 1):
-        X, Y = generate_current_training_data(DATA, Loading_mapping, horizon=i)
-        models.append(train_model_current(X, Y))
-    return models
+def train_mean_model(Data):
+    df = Data.pivot(columns='Measurement', values='Value')
 
-def predict_Currents(models, DATA, Loading_mapping, horizon, t):
-    ##
-    quantiles = [0.5]
-    ##    ##
-    qs = pd.DataFrame(index=[t + pd.Timedelta(hours=i) for i in range(1, horizon + 1)],
-                      columns=[f'quantile_{q}' for q in quantiles])
-    for i in range(1, horizon + 1):
-        X, Y = generate_current_training_data(DATA, Loading_mapping, horizon=i)
-        X = X[X.index == t]
-        df = predict_I_value(models[i - 1], X)
-        qs.loc[t + pd.Timedelta(hours=i), :] = df[qs.columns].values
+    # # Select features and target
+    features = ['HV Current', 'Ambient Temperature']  # adjust as needed
+    target = 'Top Oil Temperature'
+    df = df[features+[target]]
+    df = df.resample('60min').mean()
+    df.dropna(inplace=True)
 
-    return qs
+    #
+    X_scaled = df[features]/maxV[features]
+    y_scaled = df[target]/maxV[target]
+    sequence_length = 24  # e.g., use past 24 hours
+    X_seq, y_seq = create_multistep_sequences(X_scaled, y_scaled, input_len=24, output_len=6)
 
-def predict_oil_future(model_oil, models, DATA, OLMS_top_oil_mapping, Loading_mapping, DGA_mapping, t):
-    horizon = len(models)
-    Is = predict_Currents(models, DATA, Loading_mapping, horizon, t)
-    Xoil, Yoil = generate_training_data_oil(DATA, OLMS_top_oil_mapping, DGA_mapping)
-    maxX = maxV[Xoil.columns]
-    Xoil = Xoil[(Xoil.index >= t) & (Xoil.index <= t + pd.Timedelta(hours=horizon))]
-    OIL_temp = pd.DataFrame(index=[t + pd.Timedelta(hours=h) for h in range(horizon + 1)],
-                            columns=['max', 'mean', 'min'])
-    OIL_temp.loc[t] = Yoil[t]
-    for i in range(1, horizon + 1):
-        if i == 1:
-            Oil_in = Xoil.loc[t + pd.Timedelta(hours=1)]
-            Oil_in['HV Current'] = Is.loc[t + pd.Timedelta(hours=1)].values[0] + 16 * 3
-            Oil_in['Top Oil Temperature'] = Yoil[t]
-            X = pd.DataFrame(Oil_in.values.reshape(1, Xoil.shape[1]), index=[t + pd.Timedelta(hours=1)],
-                             columns=Oil_in.index)
-            OIL_temp.loc[t + pd.Timedelta(hours=1), 'max'] = Yoil[t] + 2 * (
-                        (model_oil.predict((X / maxX)) * maxX['Top Oil Temperature'])[0][0] - Yoil[t])
-            X['HV Current'] = X['HV Current'] - 16 * 3
-            OIL_temp.loc[t + pd.Timedelta(hours=1), 'mean'] = Yoil[t] + 2 * (
-                        (model_oil.predict((X / maxX)) * maxX['Top Oil Temperature'])[0][0] - Yoil[t])
-            X['HV Current'] = X['HV Current'] - 16 * 3
-            OIL_temp.loc[t + pd.Timedelta(hours=1), 'min'] = Yoil[t] + 2 * (
-                        (model_oil.predict((X / maxX)) * maxX['Top Oil Temperature'])[0][0] - Yoil[t])
-        else:
-            Oil_in = Xoil.loc[t + pd.Timedelta(hours=i)]
-            Oil_in['HV Current'] = Is.loc[t + pd.Timedelta(hours=i)].values[0] + 16 * 3
-            Oil_in['Top Oil Temperature'] = OIL_temp.loc[t + pd.Timedelta(hours=i - 1), 'max']
-            X = pd.DataFrame(Oil_in.values.reshape(1, Xoil.shape[1]), index=[t + pd.Timedelta(hours=i)],
-                             columns=Oil_in.index)
-            OIL_temp.loc[t + pd.Timedelta(hours=i), 'max'] = OIL_temp.loc[t + pd.Timedelta(hours=i - 1), 'max'] + 2 * (
-                        (model_oil.predict((X / maxX)) * maxX['Top Oil Temperature'])[0][0] - OIL_temp.loc[
-                    t + pd.Timedelta(hours=i - 1), 'max'])
-            X['HV Current'] = X['HV Current'] - 16 * 3
-            X['Top Oil Temperature'] = OIL_temp.loc[t + pd.Timedelta(hours=i - 1), 'mean']
-            OIL_temp.loc[t + pd.Timedelta(hours=i), 'mean'] = OIL_temp.loc[
-                                                                  t + pd.Timedelta(hours=i - 1), 'mean'] + 2 * ((
-                                                                                                                            model_oil.predict(
-                                                                                                                                (
-                                                                                                                                            X / maxX)) *
-                                                                                                                            maxX[
-                                                                                                                                'Top Oil Temperature'])[
-                                                                                                                    0][
-                                                                                                                    0] -
-                                                                                                                OIL_temp.loc[
-                                                                                                                    t + pd.Timedelta(
-                                                                                                                        hours=i - 1), 'mean'])
-            X['HV Current'] = X['HV Current'] - 16 * 3
-            X['Top Oil Temperature'] = OIL_temp.loc[t + pd.Timedelta(hours=i - 1), 'min']
-            OIL_temp.loc[t + pd.Timedelta(hours=i), 'min'] = OIL_temp.loc[t + pd.Timedelta(hours=i - 1), 'min'] + 2 * (
-                        (model_oil.predict((X / maxX)) * maxX['Top Oil Temperature'])[0][0] - OIL_temp.loc[
-                    t + pd.Timedelta(hours=i - 1), 'min'])
+    model = Sequential([
+        LSTM(128, input_shape=(X_seq.shape[1], X_seq.shape[2])),
+        Dense(32),  # 6 output values, one per hour
+        Dense(6)  # 6 output values, one per hour
+    ])
 
-    Probs = probability_to_exceed(60, OIL_temp.loc[OIL_temp.index[1:], 'mean'], (
-                OIL_temp.loc[OIL_temp.index[1:], 'max'] - OIL_temp.loc[OIL_temp.index[1:], 'mean']) / 3.4)
-    return OIL_temp, Probs * 100
+    model.compile(optimizer='adam', loss='mse')
+    #
+    model.summary()
+    #
+    model.fit(X_seq, y_seq, epochs=40, batch_size=32, validation_split=0.2)
+
+    return model
+
+
+
+
+
 
 def prepare_model_top_oil(X, Y):
     # Specify the directory path
@@ -305,6 +279,7 @@ def prepare_model_top_oil(X, Y):
     std_error = (Y - ypred.reshape(ypred.shape[0])).std()
     threshold = mean_error + 3 * std_error
     return model, threshold
+
 
 def predict_top_oil(X_test, y_test, model, threshold):
     # model = tf_keras.models.load_model('Models/Top_Oil',custom_objects={'loss_mse':  loss_mse})
@@ -424,7 +399,8 @@ def prepare_DGA_df(DATA, OLMS_mapping):
     return DGA
 
 def prepare_bushing_capacitance_df(DATA, bushing_mapping):
-    Capacitances = pd.DataFrame(columns=['Cap H1', 'Cap H2', 'Cap H3', 'Cap Y1', 'Cap Y2','Cap Y3'])
+    Capacitances = pd.DataFrame(columns=['Capacitance HV1', 'Capacitance HV2', 'Capacitance HV3',
+                                         'Capacitance LV1', 'Capacitance LV2','Capacitance LV3'])
     for col in Capacitances.columns:
         Capacitances[col] = DATA.loc[DATA.Measurement == bushing_mapping[col], 'Value'].resample('180min').mean()
 
@@ -440,11 +416,12 @@ def prepare_top_oil_relevant_data(DATA, OLMS_DATA_top_oil_mapping):
 
 def data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping, bushings_mapping):
     OIL = remove_extremes_OIL(DATA, OLMS_DATA_top_oil_mapping)
-
+    OIL = OIL.resample('30min').mean()
+    OIL.dropna(inplace=True)
     DGA = prepare_DGA_df(DATA, DGA_mapping).dropna()
     if DGA.shape[0]>=1:
         ids = compute_normal_scenarios(DGA)
-        OIL = OIL.loc[ids]
+        OIL = OIL.loc[DGA.index[ids.values].intersection(OIL.index)]
 
     Capacitances = prepare_bushing_capacitance_df(DATA,bushing_mapping=bushings_mapping)
     if Capacitances.shape[0]>=1:
@@ -462,11 +439,16 @@ def data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping
 
 def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping,bushing_mapping):
     OIL = data_cleaning_for_top_oil_train(DATA, OLMS_DATA_top_oil_mapping, DGA_mapping,bushing_mapping)
-    train_ids = OIL.index[OIL.rolling('30min').count().sum(axis=1) == OIL.shape[1]]
+    OIL = OIL.resample('60min').mean()
+
+    train_ids = OIL.index[OIL.rolling('60min').count().sum(axis=1) == OIL.shape[1]]
 
     train_ids = train_ids[1:]
     Y = OIL.loc[train_ids, 'Top Oil Temperature']
     X = OIL.shift(1).loc[train_ids]
+    X= X.dropna(axis=0)
+    Y = Y.loc[X.index]
+
     return X, Y
 
 
@@ -544,18 +526,15 @@ def compute_warning_on_bushing(t, DATA, Bushings_mapping):
     return Message
 
 
-def compute_warning_on_DGA(t, DATA, DGA_mapping):
+def compute_warning_on_DGA(DATA):
+    DGA_mapping = {'H2': "H2", 'CH4': "CH4", 'C2H2': "C2H2", 'C2H6': "C2H6", 'C2H4': "C2H4"}
     DGA = prepare_DGA_df(DATA, DGA_mapping)
-    DGA_last = DGA[(DGA.index >= (t - pd.Timedelta(days=1))) & (DGA.index <= t)]
-    DGA_last['C2H2_State'] = DGA_last['C2H2'].apply(compute_acetylene_condition_state)
-    DGA_last['C2H6_State'] = DGA_last['C2H6'].apply(compute_ethane_condition_state)
-    DGA_last['C2H4_State'] = DGA_last['C2H4'].apply(compute_ethylene_condition_state)
-    DGA_last['CH4_State'] = DGA_last['CH4'].apply(compute_methane_condition_state)
-    DGA_last['H2_State'] = DGA_last['H2'].apply(compute_hydrogen_condition_state)
-    DGA_last = DGA_last.mean()
-    DGA_last['SCORE'] = 50 * DGA_last['H2_State'] + 30 * (
-                DGA_last['CH4_State'] + DGA_last['C2H4_State'] + DGA_last['C2H6_State']) + 120 * DGA_last['C2H2_State']
-    DGA_last.drop(index=['C2H2_State', 'C2H6_State', 'C2H4_State', 'CH4_State', 'H2_State'], inplace=True)
-    DGA = pd.DataFrame(index=['status'], columns=DGA_last.index)
-    DGA.loc['status', :] = DGA_last.values.transpose()
+    DGA.fillna(0,inplace=True)
+    DGA['C2H2_Score'] = DGA['C2H2'].apply(compute_acetylene_condition_state)
+    DGA['C2H6_Score'] = DGA['C2H6'].apply(compute_ethane_condition_state)
+    DGA['C2H4_Score'] = DGA['C2H4'].apply(compute_ethylene_condition_state)
+    DGA['CH4_Score'] = DGA['CH4'].apply(compute_methane_condition_state)
+    DGA['H2_Score'] = DGA['H2'].apply(compute_hydrogen_condition_state)
+    DGA['SCORE'] = 50 * DGA['H2_Score'] + 30 * (
+                DGA['CH4_Score'] + DGA['C2H4_Score'] + DGA['C2H6_Score']) + 120 * DGA['C2H2_Score']
     return DGA
