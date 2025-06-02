@@ -71,47 +71,46 @@ def probability_to_exceed(value, mean, std):
     # The probability to exceed the value is 1 - CDF
     exceed_probability = cdf_value
 
-    return pd.DataFrame(exceed_probability.reshape(1, 6), index=['Failure Probability (%)'], columns=z.index)
+    return pd.DataFrame(100*(1-exceed_probability.reshape(1, 6)), index=['Failure Probability (%)'], columns=z.index)
 
-def html_future_oil_temp_plot(OIL_temp):
+def html_future_oil_temp_plot(OIL_temp,threshold):
     # Create Plotly figure
     fig = go.Figure()
 
     # Add the first line
-    fig.add_trace(go.Scatter(x=OIL_temp.index, y=OIL_temp['max'].values, mode='lines', name='max'))
-    fig.add_trace(go.Scatter(x=OIL_temp.index, y=OIL_temp['mean'].values, mode='lines', name='mean'))
-    fig.add_trace(go.Scatter(x=OIL_temp.index, y=OIL_temp['min'].values, mode='lines', name='min'))
+    fig.add_trace(go.Scatter(x=OIL_temp.index, y=OIL_temp['Q90'].values, mode='lines', name='Q90',line=dict(color='magenta')))
+    fig.add_trace(go.Scatter(x=OIL_temp.index, y=OIL_temp['Q50'].values, mode='lines', name='Q50',line=dict(color='green')))
 
-    # Fill the area between min and max lines
-    fig.add_trace(go.Scatter(
-        x=OIL_temp.index,
-        y=OIL_temp['max'].values,
-        mode='lines',
-        line=dict(color='rgba(255, 255, 255, 0)'),  # Transparent line for the max line
-        showlegend=False,
-        name='max'
-    ))
-
-    fig.add_trace(go.Scatter(
-        x=OIL_temp.index,
-        y=OIL_temp['min'].values,
-        mode='lines',
-        line=dict(color='rgba(255, 255, 255, 0)'),  # Transparent line for the min line
-        fill='tonexty',  # Fill area between this line and the previous line
-        fillcolor='rgba(128, 128, 128, 0.5)',  # Gray color with some transparency
-        showlegend=False,
-        name='min'
-    ))
+    # # Fill the area between min and max lines
+    # fig.add_trace(go.Scatter(
+    #     x=OIL_temp.index,
+    #     y=OIL_temp['Q90'].values,
+    #     mode='lines',
+    #     line='red',#dict(color='rgba(255, 255, 255, 0)'),  # Transparent line for the max line
+    #     showlegend=True,
+    #     name='max'
+    # ))
+    #
+    # fig.add_trace(go.Scatter(
+    #     x=OIL_temp.index,
+    #     y=OIL_temp['Q50'].values,
+    #     mode='lines',
+    #     line='green',#dict(color='rgba(255, 255, 255, 0)'),  # Transparent line for the min line
+    #     #fill='tonexty',  # Fill area between this line and the previous line
+    #     #fillcolor='rgba(128, 128, 128, 0.5)',  # Gray color with some transparency
+    #     showlegend=True,
+    #     name='min'
+    # ))
 
     # Add the second line
     fig.add_trace(go.Scatter(x=OIL_temp.index,
-                             y=threshold['Top Oil Temperature'] * OIL_temp['min'].values / OIL_temp['min'].values,
-                             mode='lines', name='Treshold'))
+                             y=threshold * OIL_temp['Q50'].values / OIL_temp['Q50'].values,
+                             mode='lines', name='Treshold',line=dict(color='red',dash='dash')))
 
     # Customize the layout (optional)
     fig.update_layout(title="Oil Temperature Forecast (°C)",
-                      showlegend=False,
-                      template="plotly_white")
+                      showlegend=True)
+                      #template="plotly_white")
     #fig.show()
     return fig.to_html()
 
@@ -205,6 +204,19 @@ def quantile_loss(q):
     return loss
 
 
+def predict_q90_model(model,Data):
+    features = ['HV Current', 'Ambient Temperature']  # adjust as needed
+    target = 'Top Oil Temperature'
+    Data = Data[features+[target]]
+    Data = Data.resample('60min').mean()
+    Data.dropna(inplace=True)
+    X_scaled = Data[features]/maxV[features]
+    y_scaled = Data[target]/maxV[target]
+    X_seq, y_seq = create_multistep_sequences(X_scaled, y_scaled, input_len=24, output_len=6)
+    print(X_seq[-1,:,:])
+    y_seq = model.predict(X_seq[-1,:,:].reshape(1, 24, 2))*maxV[target]
+    return y_seq
+
 def train_q90_model(Data):
     df = Data.pivot(columns='Measurement', values='Value')
 
@@ -288,8 +300,8 @@ def predict_top_oil(X_test, y_test, model, threshold):
     DATA = pd.DataFrame(columns=['Real', 'Estimate'])
     DATA['Real'] = y_test
     DATA['Estimate'] = ypred
-    issues, errors = anomaly_detection_in_oil_temp(ypred, y_test, threshold)
-    return issues, errors
+    alarms = anomaly_detection_in_oil_temp(ypred, y_test, threshold)
+    return alarms
 
 
 def predict_T_bushing(model, X_test, y_test):
@@ -488,11 +500,39 @@ def generate_current_training_data(DATA, Loading_mapping, horizon):
 
 
 def anomaly_detection_in_oil_temp(y_pred, y_true, threshold):
+    # MRi = y_true - pd.Series(y_pred.reshape(y_pred.shape[0]), index=y_true.index)
+    # MR = MRi.diff().dropna()
+    # #2 hours above threshold
+    # Flags = (MR >= threshold).rolling(window=3).mean() >= 0.6
     MRi = y_true - pd.Series(y_pred.reshape(y_pred.shape[0]), index=y_true.index)
-    MR = MRi.diff().dropna()
-    Flags = (MR >= threshold).rolling(window=4).mean() >= 0.75
+    MR = MRi.abs().diff().dropna()
+    MRmean = MR.mean()
 
-    return Flags, MR
+    UCL = 0*MRmean +threshold#+ 3*MR.std()
+    LCL = 0*MRmean -threshold#- 3*MR.std()
+    alarms = pd.Series(False, index=MR.index)
+    print(UCL, LCL)
+    # Iterate with a window of 2 to find consecutive alarms exactly 1 hour apart
+    mr_indices = MR.index
+    for i in range(1, len(MR)):
+        idx_prev = mr_indices[i - 1]
+        idx_curr = mr_indices[i]
+
+        # Check time difference exactly 1 hour
+        if (idx_curr - idx_prev) == pd.Timedelta(hours=1):
+            # Check if both points are out of control limits
+            if ((MR[idx_prev] > UCL or MR[idx_prev] < LCL) and
+                (MR[idx_curr] > UCL or MR[idx_curr] < LCL)):
+                alarms[idx_prev] = True
+                alarms[idx_curr] = True
+
+    # Build final DataFrame
+    alarms_df = pd.DataFrame({
+        'alarms': alarms,
+        'Deviation (Celsius)': MR.loc[alarms.index]
+    })
+
+    return alarms_df
 
 
 def compute_warning_on_bushing(t, DATA, Bushings_mapping):

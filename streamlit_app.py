@@ -4,9 +4,9 @@ import pandas as pd
 import math
 from pathlib import Path
 from AAM_predict_toolbox import  html_future_oil_temp_plot, train_q90_model, \
-    compute_warning_on_bushing, compute_warning_on_DGA, display_light, generate_training_data_oil, \
-    prepare_model_top_oil, predict_top_oil, html_error_plot, train_mean_model, loss_mse
-from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String
+     compute_warning_on_DGA, display_light, generate_training_data_oil, \
+    prepare_model_top_oil, predict_top_oil, html_error_plot, train_mean_model, predict_q90_model, probability_to_exceed
+from sqlalchemy import create_engine
 import numpy as np
 import os
 from datetime import datetime, timedelta, time
@@ -148,105 +148,134 @@ def import_data(assets,measurements_IDs):
         st.header("Historical Data Input")
         st.write("Provide Historical Data")
 
-        # File uploader
-        uploaded_file = st.file_uploader("Choose a file", type=["csv"], key=1)
-
         st.session_state.asset = st.selectbox("Asset:",
                                        assets.AssetName,
                                         key=f"select_asset", index=None  # Unique key for each selectbox
                                     )
-        # Process the file after it's uploaded
-        if (uploaded_file is not None)&(st.session_state.asset is not None):
-            if 'uploaded_file' not in st.session_state or st.session_state['uploaded_file'] != uploaded_file.name:
-                if uploaded_file is not None:
-                    st.session_state['uploaded_file'] = uploaded_file.name
+        if st.session_state.asset is not None:
+            # File uploader
+            uploaded_file = st.file_uploader("Choose a file", type=["csv"], key=1)
 
-                    # Efficient reading and parsing
-                    OLMS_DATA = pd.read_csv(
-                        uploaded_file,
-                        delimiter=';',
-                        parse_dates=['Timestamp'],
-                        low_memory=False
-                    )
-                    OLMS_DATA.set_index('Timestamp', inplace=True)
+            # Process the file after it's uploaded
+            if (uploaded_file is not None)&(st.session_state.asset is not None):
+                if 'uploaded_file' not in st.session_state or st.session_state['uploaded_file'] != uploaded_file.name:
+                    if uploaded_file is not None:
+                        st.session_state['uploaded_file'] = uploaded_file.name
+                        REQUIRED_COLUMNS = ['Timestamp', 'Measurement', 'Value']
+                        try:
+                            OLMS_DATA = pd.read_csv(
+                                uploaded_file,
+                                delimiter=';',
+                                parse_dates=['Timestamp'],
+                                low_memory=False
+                            )
 
-                    st.write("✅ File loaded and indexed successfully")
-                    st.write("File content as DataFrame:")
-                    st.write(OLMS_DATA.head())
-                    st.session_state['OLMS_DATA'] = OLMS_DATA
-                    st.session_state.file_uploaded = True  #boolean to track that the right file has been uploaded
-                    st.write("File has been uploaded successfully")
-                    st.rerun()
+                            # Check for required columns
+                            missing_cols = [col for col in REQUIRED_COLUMNS if col not in OLMS_DATA.columns]
+                            if missing_cols:
+                                st.error(f"❌ Missing required columns: {missing_cols}")
+                                st.stop()
+
+                            # Set index
+                            OLMS_DATA.set_index('Timestamp', inplace=True)
+
+                            # Check data types if needed (optional)
+                            if not pd.api.types.is_numeric_dtype(OLMS_DATA['Value']):
+                                st.error("❌ 'Value' column must be numeric.")
+                                st.stop()
+
+                            if not pd.api.types.is_string_dtype(OLMS_DATA['Measurement']):
+                                st.error("❌ 'Value' must be string.")
+                                st.stop()
+
+                            # Success
+                            st.write("✅ File loaded and indexed successfully")
+                            st.write("File content as DataFrame:")
+                            st.write(OLMS_DATA.head())
+                            st.session_state['OLMS_DATA'] = OLMS_DATA
+                            st.session_state.file_uploaded = True
+                            st.rerun()
+
+                        except Exception as e:
+                            st.error(f"❌ Error processing file: {e}")
+
+                        st.write("✅ File loaded and indexed successfully")
+                        st.write("File content as DataFrame:")
+                        st.write(OLMS_DATA.head())
+                        st.session_state['OLMS_DATA'] = OLMS_DATA
+                        st.session_state.file_uploaded = True  #boolean to track that the right file has been uploaded
+                        st.write("File has been uploaded successfully")
+                        st.rerun()
+                    else:
+                        st.write("File is not csv")
                 else:
-                    st.write("File is not csv")
-            else:
-                # If file is already uploaded, display the previous result from session state
-                if (st.session_state.OLMS_DATA is not None)&(not(st.session_state.mapping_confirmed)):
-                    with st.expander("Measurement Mapping", expanded=True):
-                        tabs_mapping = st.tabs(["Measurement Mapping", "Bushings Mapping", "DGA mapping"])
-                        with tabs_mapping[0]:
-                            if st.session_state.OLMS_DATA is not None:
+                    # If file is already uploaded, display the previous result from session state
+                    if (st.session_state.OLMS_DATA is not None)&(not(st.session_state.mapping_confirmed)):
+                        with st.expander("Measurement Mapping", expanded=True):
+                            tabs_mapping = st.tabs(["Measurement Mapping", "Bushings Mapping", "DGA mapping"])
+                            with tabs_mapping[0]:
+                                if st.session_state.OLMS_DATA is not None:
+                                    selected_options = {}
+                                    st.write(st.session_state.OLMS_DATA_top_oil_mapping)
+                                    for key in st.session_state.OLMS_DATA_top_oil_mapping.keys():
+                                        option = st.selectbox(
+                                            key + ":",
+                                            st.session_state.OLMS_DATA.Measurement.unique().tolist()+[None],
+                                            key=f"select_{key}", index=None  # Unique key for each selectbox
+                                        )
+                                        st.write("You selected:", option)
+                                        selected_options[key] = option  # Store in new variable
+                                    confirm_button1 = st.button("Confirm Choices", key="Measurement Mapping")  # No need for a key since it's a single button
+                                    if confirm_button1:
+                                        st.session_state.OLMS_DATA_top_oil_mapping = selected_options
+                                        st.write("Selections confirmed:")
+                                        for key, value in selected_options.items():
+                                            st.write(f"**{key}:** {value}")
+                                        st.rerun()
+                            with tabs_mapping[1]:
                                 selected_options = {}
-                                st.write(st.session_state.OLMS_DATA_top_oil_mapping)
-                                for key in st.session_state.OLMS_DATA_top_oil_mapping.keys():
+                                st.write(st.session_state.Bushings_mapping)
+                                for key in st.session_state.Bushings_mapping.keys():
                                     option = st.selectbox(
-                                        key + ":",
-                                        st.session_state.OLMS_DATA.Measurement.unique().tolist()+[None],
-                                        key=f"select_{key}", index=None  # Unique key for each selectbox
-                                    )
+                                            key + ":",
+                                            st.session_state.OLMS_DATA.Measurement.unique().tolist()+[None],
+                                            key=f"select_bushing_{key}"  # Unique key for each selectbox
+                                        )
                                     st.write("You selected:", option)
                                     selected_options[key] = option  # Store in new variable
-                                confirm_button1 = st.button("Confirm Choices", key="Measurement Mapping")  # No need for a key since it's a single button
-                                if confirm_button1:
-                                    st.session_state.OLMS_DATA_top_oil_mapping = selected_options
+                                confirm_button2 = st.button("Confirm Choices", key="Bushings Mapping")  # No need for a key since it's a single button
+                                if confirm_button2:
+                                    st.session_state.Bushings_mapping = selected_options
                                     st.write("Selections confirmed:")
                                     for key, value in selected_options.items():
                                         st.write(f"**{key}:** {value}")
                                     st.rerun()
-                        with tabs_mapping[1]:
-                            selected_options = {}
-                            st.write(st.session_state.Bushings_mapping)
-                            for key in st.session_state.Bushings_mapping.keys():
-                                option = st.selectbox(
-                                        key + ":",
-                                        st.session_state.OLMS_DATA.Measurement.unique().tolist()+[None],
-                                        key=f"select_bushing_{key}"  # Unique key for each selectbox
-                                    )
-                                st.write("You selected:", option)
-                                selected_options[key] = option  # Store in new variable
-                            confirm_button2 = st.button("Confirm Choices", key="Bushings Mapping")  # No need for a key since it's a single button
-                            if confirm_button2:
-                                st.session_state.Bushings_mapping = selected_options
-                                st.write("Selections confirmed:")
-                                for key, value in selected_options.items():
-                                    st.write(f"**{key}:** {value}")
-                                st.rerun()
-                        with tabs_mapping[2]:
-                            selected_options = {}
-                            st.write(st.session_state.DGA_mapping)
-                            for key in st.session_state.DGA_mapping.keys():
-                                option = st.selectbox(
-                                        key + ":",
-                                        st.session_state.OLMS_DATA.Measurement.unique().tolist()+[None],
-                                        key=f"select_dga_{key}"  # Unique key for each selectbox
-                                    )
-                                st.write("You selected:", option)
-                                selected_options[key] = option  # Store in new variable
-                            confirm_button3 = st.button("Confirm Choices", key="DGA")  # No need for a key since it's a single button
-                            if confirm_button3:
-                                st.session_state.DGA_mapping = selected_options
-                                st.write("Selections confirmed:")
-                                for key, value in selected_options.items():
-                                    st.write(f"**{key}:** {value}")
-                                st.rerun()
-        else:
-            st.write("Please upload a file to see the content.")
-        if not(st.session_state.mapping_confirmed):
-            confirm_button4 = st.button("Confirm Measurements & Mapping", key="Yes")  # No need for a key since it's a single button
-            if confirm_button4:
-                st.session_state.mapping_confirmed = True
-                st.write("Mapping confirmed! Updating Database...")
-                write_measurements_in_db(engine,measurements_IDs,st.session_state.asset)
+                            with tabs_mapping[2]:
+                                selected_options = {}
+                                st.write(st.session_state.DGA_mapping)
+                                for key in st.session_state.DGA_mapping.keys():
+                                    option = st.selectbox(
+                                            key + ":",
+                                            st.session_state.OLMS_DATA.Measurement.unique().tolist()+[None],
+                                            key=f"select_dga_{key}"  # Unique key for each selectbox
+                                        )
+                                    st.write("You selected:", option)
+                                    selected_options[key] = option  # Store in new variable
+                                confirm_button3 = st.button("Confirm Choices", key="DGA")  # No need for a key since it's a single button
+                                if confirm_button3:
+                                    st.session_state.DGA_mapping = selected_options
+                                    st.write("Selections confirmed:")
+                                    for key, value in selected_options.items():
+                                        st.write(f"**{key}:** {value}")
+                                    st.rerun()
+            else:
+                st.write("Please upload a file to see the content.")
+            if not(st.session_state.mapping_confirmed):
+                confirm_button4 = st.button("Confirm Measurements & Mapping", key="Yes")  # No need for a key since it's a single button
+                if confirm_button4:
+                    st.session_state.mapping_confirmed = True
+                    st.write("Mapping confirmed! Updating Database...")
+                    write_measurements_in_db(engine,measurements_IDs,st.session_state.asset)
 
 
 def read_data_from_DB(asset_ID, engine):
@@ -373,7 +402,7 @@ assets = get_assets_of_user(user)
 measurements_IDs = get_measurements_IDs(engine)
 retrain_stale_models(assets,measurements_IDs)
 print('a')
-
+st.set_page_config(layout='wide')
 if 'OLMS_DATA' not in st.session_state:
     st.session_state.OLMS_DATA = None
 
@@ -426,7 +455,7 @@ if 'mapping_confirmed' not in st.session_state:
 
 # Set the title of the Streamlit app
 if assets.shape[0] > 0:
-    tab = st.sidebar.radio("Short Term Asset Management", ["Home", "Import Historical Logs", "Historical Data Dashboard"])
+    tab = st.sidebar.radio("Short Term Asset Management", ["Home", "Import Historical Logs", "Historical Data Dashboard", "Real Time Data Dashboard"])
     st.session_state.assets = assets
 else:
     tab = st.sidebar.radio("Navigation", ["Home"])
@@ -473,71 +502,173 @@ if tab == "Historical Data Dashboard":
     for id, asset_i in assets[assets.AssetName==asset].iterrows():
         Data = read_data_from_DB(asset_i['AssetID'], engine)
         Data = Data[(Data.Timestamp>=start_dt)&(Data.Timestamp<=end_dt)]
-        ########################################################################
-        ##Calculate DGA Scores##
+        if Data.shape[0]>=1:
+            ########################################################################
+            ##Calculate DGA Scores##
+            DGA_mapping = {'H2': "H2", 'CH4': "CH4", 'C2H2': "C2H2", 'C2H6': "C2H6", 'C2H4': "C2H4"}
+            dga_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in DGA_mapping.keys()]
+            Data_DGA = Data[Data["MeasurementID"].isin(dga_ids)]
+            for meas_id in dga_ids:
+                Data_DGA.loc[Data_DGA.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+            Data_DGA = Data_DGA.rename(columns={'MeasurementID': 'Measurement'})
+            Data_DGA.index = pd.DatetimeIndex(Data_DGA.Timestamp)
+            Data_DGA.drop(columns = ['Timestamp','AssetID'],inplace=True)
+            DGA_flag = compute_warning_on_DGA(Data_DGA)
+            st.write("📉 DGA Scores:")
+            st.dataframe(DGA_flag)
+            ########################################################################
+            ##Calculate Bushing Flags##
+            Bushings_mapping = {'Capacitance HV1': 'Capacitance HV1', 'Capacitance HV2': 'Capacitance HV2',
+                                    'Capacitance HV3': 'Capacitance HV3','Capacitance LV1': 'Capacitance LV1',
+                                    'Capacitance LV2': 'Capacitance LV2', 'Capacitance LV3': 'Capacitance LV3',
+                                    'tand HV1': 'tand HV1', 'tand HV2': 'tand HV2', 'tand HV3': 'tand HV3',
+                                                 'tand LV1':  'tand LV1', 'tand LV2': 'tand LV2', 'tand LV3': 'tand LV3'}
+            Bushings_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows()
+                            if meas['Name'] in Bushings_mapping.keys()]
+            Data_Bushings = Data[Data["MeasurementID"].isin(Bushings_ids)]
+            for meas_id in Bushings_ids:
+                Data_Bushings.loc[Data_Bushings.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+            Data_Bushings = Data_Bushings.rename(columns={'MeasurementID': 'Measurement'})
+            # Pivot the data
+            Data_Bushings = Data_Bushings.pivot(index="Timestamp", columns="Measurement", values="Value")
+            Data_Bushings = Data_Bushings.sort_index().sort_index(axis=1)
+            Data_Bushings = Data_Bushings[(Data_Bushings != 0).all(axis=1)]
+            df = Data_Bushings.copy()
+
+            cap_cols = [col for col in df.columns if "Capacitance" in col]
+            cap_df = df[cap_cols].copy()
+
+
+            # Step 1: Calculate previous day's daily mean (used for comparison)
+            daily_mean = cap_df.resample("D").mean()
+
+            # Step 2: Resample into 2-hour means
+            resampled_4h = cap_df.resample("4H").mean()
+
+            # Step 3: Get previous day's mean for each 2-hour window
+            # Create a column with the date of the *previous* day
+            prev_day_index = resampled_4h.index - pd.Timedelta(days=1)
+            prev_day_means = daily_mean.reindex(prev_day_index.date)
+
+            # Because index mismatch on datetime vs. date, align it
+            prev_day_means.index = resampled_4h.index  # force same shape for element-wise math
+
+            # Step 4: Calculate percentage change
+            pct_change = (resampled_4h - prev_day_means) / prev_day_means * 100
+
+            # Step 5: Flag large deviations
+            alerts = (pct_change < -10) | (pct_change > 5)
+
+            # Optional: Get only the rows where any alert is triggered
+            alerted_changes = pct_change[alerts.any(axis=1)]
+
+            # Display result
+            st.write("🚨 Bushing Capacitance Alerts")
+            st.dataframe(alerted_changes.style.format("{:.2f}%"))
+            ########################################################################
+            ########################################################################
+            oil_anomaly_detection_mapping = {'Top Oil Temperature': 'Top Oil Temperature', 'Ambient Temperature': 'Ambient Temperature',
+                                      'HV Current': 'HV Current'}
+            oil_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in oil_anomaly_detection_mapping.keys()]
+            Data_oil = Data[Data["MeasurementID"].isin(oil_ids)]
+            for meas_id in oil_ids:
+                Data_oil.loc[Data_oil.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+            Data_oil = Data_oil.rename(columns={'MeasurementID': 'Measurement'})
+            Data_oil.index = pd.DatetimeIndex(Data_oil.Timestamp)
+            Data_oil = Data_oil.pivot(index="Timestamp", columns="Measurement", values="Value")
+            Data_oil = Data_oil.resample('60min').mean()
+            print(Data_oil)
+
+            model = keras.models.load_model('models/top_oil_anomaly/' + asset + '.h5', compile=False)
+            with open('models/top_oil_anomaly/'+asset+'_metadata.json', 'r') as f:
+                config = json.load(f)
+            threshold = config['threshold']
+            print("Threshold:", threshold)
+            train_ids = Data_oil.index[Data_oil.rolling('60min').count().sum(axis=1) == Data_oil.shape[1]]
+            train_ids = train_ids[1:]
+            Y = Data_oil.loc[train_ids, 'Top Oil Temperature']
+            X = Data_oil.shift(1).loc[train_ids]
+            X= X.dropna(axis=0)
+            Y = Y.loc[X.index]
+            alarms = predict_top_oil(X,Y,model, threshold)
+            st.write("🚨Top Oil Temperature anomalies detected")
+            st.dataframe(alarms[alarms['alarms']==True])
+        else:
+            st.write(f"🚨No data available for asset:{asset_i['AssetName']}")
+
+if tab == "Real Time Data Dashboard":
+    st.header('Real Time Data Dashboard')
+    asset =  st.selectbox("Asset:",
+                                       assets.AssetName,
+                                        key=f"select_asset", index=None  # Unique key for each selectbox
+                                    )
+    for id, asset_i in assets[assets.AssetName==asset].iterrows():
+        Data = read_data_from_DB(asset_i['AssetID'], engine)
+        latest_ts = Data.Timestamp.max()
+        Data = Data[(Data.Timestamp >= latest_ts - pd.Timedelta(hours=48)) & (Data.Timestamp <= latest_ts)]
+        st.write(f"Real Time Dashboard: Latest data received at: {latest_ts}")
         DGA_mapping = {'H2': "H2", 'CH4': "CH4", 'C2H2': "C2H2", 'C2H6': "C2H6", 'C2H4': "C2H4"}
         dga_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in DGA_mapping.keys()]
         Data_DGA = Data[Data["MeasurementID"].isin(dga_ids)]
-        for meas_id in dga_ids:
-            Data_DGA.loc[Data_DGA.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
-        Data_DGA = Data_DGA.rename(columns={'MeasurementID': 'Measurement'})
-        Data_DGA.index = pd.DatetimeIndex(Data_DGA.Timestamp)
-        Data_DGA.drop(columns = ['Timestamp','AssetID'],inplace=True)
-        DGA_flag = compute_warning_on_DGA(Data_DGA)
-        st.write("📉 DGA Scores:")
-        st.dataframe(DGA_flag)
-        ########################################################################
-        ##Calculate Bushing Flags##
+        if Data_DGA.shape[0]>=1:
+            for meas_id in dga_ids:
+                Data_DGA.loc[Data_DGA.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+            Data_DGA = Data_DGA.rename(columns={'MeasurementID': 'Measurement'})
+            Data_DGA.index = pd.DatetimeIndex(Data_DGA.Timestamp)
+            Data_DGA.drop(columns = ['Timestamp','AssetID'],inplace=True)
+            DGA_flag = compute_warning_on_DGA(Data_DGA)
+        else:
+            DGA_flag = pd.DataFrame()
         Bushings_mapping = {'Capacitance HV1': 'Capacitance HV1', 'Capacitance HV2': 'Capacitance HV2',
-                                'Capacitance HV3': 'Capacitance HV3','Capacitance LV1': 'Capacitance LV1',
-                                'Capacitance LV2': 'Capacitance LV2', 'Capacitance LV3': 'Capacitance LV3',
-                                'tand HV1': 'tand HV1', 'tand HV2': 'tand HV2', 'tand HV3': 'tand HV3',
-                                             'tand LV1':  'tand LV1', 'tand LV2': 'tand LV2', 'tand LV3': 'tand LV3'}
+                                        'Capacitance HV3': 'Capacitance HV3','Capacitance LV1': 'Capacitance LV1',
+                                        'Capacitance LV2': 'Capacitance LV2', 'Capacitance LV3': 'Capacitance LV3',
+                                        'tand HV1': 'tand HV1', 'tand HV2': 'tand HV2', 'tand HV3': 'tand HV3',
+                                                     'tand LV1':  'tand LV1', 'tand LV2': 'tand LV2', 'tand LV3': 'tand LV3'}
         Bushings_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows()
-                        if meas['Name'] in Bushings_mapping.keys()]
+                                if meas['Name'] in Bushings_mapping.keys()]
         Data_Bushings = Data[Data["MeasurementID"].isin(Bushings_ids)]
         for meas_id in Bushings_ids:
             Data_Bushings.loc[Data_Bushings.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
         Data_Bushings = Data_Bushings.rename(columns={'MeasurementID': 'Measurement'})
-        # Pivot the data
-        Data_Bushings = Data_Bushings.pivot(index="Timestamp", columns="Measurement", values="Value")
-        Data_Bushings = Data_Bushings.sort_index().sort_index(axis=1)
-        df = Data_Bushings.copy()
+        if Data_Bushings.shape[0]>=48:
+            # Pivot the data
+            Data_Bushings = Data_Bushings.pivot(index="Timestamp", columns="Measurement", values="Value")
+            Data_Bushings = Data_Bushings.sort_index().sort_index(axis=1)
+            Data_Bushings = Data_Bushings[(Data_Bushings != 0).all(axis=1)]
+            df = Data_Bushings.copy()
 
-        cap_cols = [col for col in df.columns if "Capacitance" in col]
-        cap_df = df[cap_cols].copy()
+            cap_cols = [col for col in df.columns if "Capacitance" in col]
+            cap_df = df[cap_cols].copy()
 
 
-        # Step 1: Calculate previous day's daily mean (used for comparison)
-        daily_mean = cap_df.resample("D").mean()
+            # Step 1: Calculate previous day's daily mean (used for comparison)
+            daily_mean = cap_df.resample("D").mean()
 
-        # Step 2: Resample into 2-hour means
-        resampled_4h = cap_df.resample("4H").mean()
+            # Step 2: Resample into 2-hour means
+            resampled_4h = cap_df.resample("4H").mean()
 
-        # Step 3: Get previous day's mean for each 2-hour window
-        # Create a column with the date of the *previous* day
-        prev_day_index = resampled_4h.index - pd.Timedelta(days=1)
-        prev_day_means = daily_mean.reindex(prev_day_index.date)
+            # Step 3: Get previous day's mean for each 2-hour window
+            # Create a column with the date of the *previous* day
+            prev_day_index = resampled_4h.index - pd.Timedelta(days=1)
+            prev_day_means = daily_mean.reindex(prev_day_index.date)
 
-        # Because index mismatch on datetime vs. date, align it
-        prev_day_means.index = resampled_4h.index  # force same shape for element-wise math
+            # Because index mismatch on datetime vs. date, align it
+            prev_day_means.index = resampled_4h.index  # force same shape for element-wise math
 
-        # Step 4: Calculate percentage change
-        pct_change = (resampled_4h - prev_day_means) / prev_day_means * 100
+            # Step 4: Calculate percentage change
+            pct_change = (resampled_4h - prev_day_means) / prev_day_means * 100
 
-        # Step 5: Flag large deviations
-        alerts = (pct_change < -10) | (pct_change > 5)
+            # Step 5: Flag large deviations
+            alerts = (pct_change < -10) | (pct_change > 5)
 
-        # Optional: Get only the rows where any alert is triggered
-        alerted_changes = pct_change[alerts.any(axis=1)]
-
-        # Display result
-        st.write("🚨 Bushing Capacitance Alerts")
-        st.dataframe(alerted_changes.style.format("{:.2f}%"))
+            # Optional: Get only the rows where any alert is triggered
+            Alarms_Bushings = pct_change[alerts.any(axis=1)]
+        else:
+            Data_Bushings = pd.DataFrame()
         ########################################################################
         ########################################################################
         oil_anomaly_detection_mapping = {'Top Oil Temperature': 'Top Oil Temperature', 'Ambient Temperature': 'Ambient Temperature',
-                                  'HV Current': 'HV Current'}
+                                          'HV Current': 'HV Current'}
         oil_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in oil_anomaly_detection_mapping.keys()]
         Data_oil = Data[Data["MeasurementID"].isin(oil_ids)]
         for meas_id in oil_ids:
@@ -545,143 +676,93 @@ if tab == "Historical Data Dashboard":
         Data_oil = Data_oil.rename(columns={'MeasurementID': 'Measurement'})
         Data_oil.index = pd.DatetimeIndex(Data_oil.Timestamp)
         Data_oil = Data_oil.pivot(index="Timestamp", columns="Measurement", values="Value")
-        Data_oil = Data_oil.resample('60min').mean()
-        print(Data_oil)
-        # model = keras.models.load_model(
-        #         'models/top_oil_anomaly/' + asset + '.h5'
-        #     )
-        model = keras.models.load_model('models/top_oil_anomaly/' + asset + '.h5', compile=False)
-        with open('models/top_oil_anomaly/'+asset+'_metadata.json', 'r') as f:
-            config = json.load(f)
-        threshold = config['threshold']
-        print("Threshold:", threshold)
-        train_ids = Data_oil.index[Data_oil.rolling('60min').count().sum(axis=1) == Data_oil.shape[1]]
-        train_ids = train_ids[1:]
-        Y = Data_oil.loc[train_ids, 'Top Oil Temperature']
-        X = Data_oil.shift(1).loc[train_ids]
-        X= X.dropna(axis=0)
-        Y = Y.loc[X.index]
-        alarms, errors = predict_top_oil(X,Y,model, threshold)
+        if Data_oil.shape[0]>=2:
+            Data_oil = Data_oil.resample('60min').mean()
+            model = keras.models.load_model('models/top_oil_anomaly/' + asset + '.h5', compile=False)
+            with open('models/top_oil_anomaly/'+asset+'_metadata.json', 'r') as f:
+                config = json.load(f)
+            threshold = config['threshold']
+            train_ids = Data_oil.index[Data_oil.rolling('60min').count().sum(axis=1) == Data_oil.shape[1]]
+            train_ids = train_ids[1:]
+            Y = Data_oil.loc[train_ids, 'Top Oil Temperature']
+            X = Data_oil.shift(1).loc[train_ids]
+            X= X.dropna(axis=0)
+            Y = Y.loc[X.index]
+            alarms_oil = predict_top_oil(X,Y,model, threshold)
+        else:
+            alarms_oil = pd.DataFrame()
+    tabs_real_time = st.tabs(['Alarms','Top Oil Forecast'])
+    with tabs_real_time[0]:
+        col1, col2, col3 = st.columns([20, 20, 20])
+        with col1:
+            st.subheader("Dissolved Gas Analysis")
+            if DGA_flag.shape[0]>=1:
+                st.markdown(display_light(not ((DGA_flag['SCORE'] <= 3).any())), unsafe_allow_html=True)
+                if (DGA_flag['SCORE'] <= 3).any():
+                    DGA_flag['SCORE'] = 'ok'
+                    st.write("Status ok. No action suggested based on DGA data of last 48 hours")
+                elif (3 < DGA_flag['SCORE']).any() & (DGA_flag['SCORE'] <= 5).any():
+                    DGA_flag['SCORE'] = 'minor warning'
+                    st.write("Gas levels considerable but within limits. Increase monitoring")
+                elif (5 < DGA_flag['SCORE']).any() & (DGA_flag['SCORE'] <= 7).any():
+                    DGA_flag['SCORE'] = 'warning'
+                    st.write("Gas levels considerable. Maintenance actions suggested")
+                else:
+                    DGA_flag['SCORE'] = 'critical'
+                    st.write("Gas levels critical. Maintenance actions suggested")
+                st.write("DGA Results")
+                st.write(DGA_flag)
+            else:
+                st.write("Insufficient Data for Dissolved Gas Analysis")
+        with col2:
+            st.subheader("Bushings Analysis")
+            print('Here')
+            if not(Data_Bushings.empty):
+                st.markdown(display_light(not(Alarms_Bushings.empty)), unsafe_allow_html=True)
+                if (Alarms_Bushings.empty):
+                    st.write("No warnings on the Bushings on past 48h. Bushing status ok. No action suggested based on DGA data of last 48 hours")
+                else:
+                    st.write("Warnings on the Bushings")
+                    st.dataframe(Alarms_Bushings.style.format("{:.2f}%"))
+            else:
+                st.write("Insufficient Data for Bushing condition assessment")
+        with col3:
+            st.subheader("Oil Anomaly Detection")
+            if alarms_oil.shape[0]>=1:
+                st.markdown(display_light(not(alarms_oil[alarms_oil.alarms==True].empty)), unsafe_allow_html=True)
+                if (alarms_oil[alarms_oil.alarms==True].empty):
+                    st.write("No anomaly detected in top oil temperature.")
+                else:
+                    st.write("Anomalies detected in Top Oil Temperature")
+                    st.dataframe(alarms_oil[alarms_oil.alarms==True])
+                st.write('Model Prediction latest 48 hours')
+                st.components.v1.html(html_error_plot(alarms_oil['Deviation (Celsius)'], threshold), height=500)
+            else:
+                st.write("Insufficient data for top-oil anomaly detection")
+    with tabs_real_time[1]:
+        st.subheader("Top Oil Temperature Forecast")
+        if Data_oil.shape[0]>=24:
+            model_90 = keras.models.load_model('models/oil_temp_forecast/' + asset + '_90.keras', compile=False)
+            model_50 = keras.models.load_model('models/oil_temp_forecast/' + asset + '_50.keras', compile=False)
+            predictions_90 = predict_q90_model(model_90,Data_oil)
+            predictions_50 = predict_q90_model(model_50,Data_oil)
+            predictions = pd.DataFrame(np.hstack((predictions_50.transpose(),predictions_90.transpose())),
+                                       columns=['Q50','Q90'],index=[Data_oil.index.max()+timedelta(hours=i)
+                                                                                                             for i in range(1,7)])
+            threshold = st.slider('Select Top Oil Temperature Limit', min_value=50.0, max_value=90.0, value=60.0, step=1.0)
+            st.components.v1.html(html_future_oil_temp_plot(predictions,threshold), height=600, width=1200, scrolling=True)
+            print(predictions)
+            st.write("Probability of Failure")
+            st.dataframe(probability_to_exceed(threshold, predictions['Q50'], (predictions['Q90'] - predictions['Q50']) / 1.2816))
+        else:
+            st.write("Insufficient data for Top-Oil Temperature Forecast")
 
-        st.write("🚨Top oil Temperature anomalies")
-        st.dataframe(alarms[alarms].style.format("{:.2f}%"))
 
 
-# # Define the tabs
-# tabs = st.tabs(["Historical Data Input", "Alarms", "Predictions"])
-#
-# # Content for the 'Home' tab
-#
-#
 
 
-#     # train Oil temperature prediction model
-#     if st.session_state.mapping_confirmed and st.session_state.both_models_trained is False:  #this code runs every time the measurements mapping button is pressed
-#         if ('OLMS_DATA' in st.session_state) & ('model_oil' not in st.session_state):
-#             st.write(st.session_state.DGA_mapping)
-#             X, Y = generate_training_data_oil(OLMS_DATA, st.session_state.OLMS_DATA_top_oil_mapping, st.session_state.DGA_mapping)
-#             st.write(X)
-#             st.write(Y)
-#             st.write('Training Oil Temperature Prediction Model...')
-#             model_oil, oil_threshold = prepare_model_top_oil(X, Y)
-#             st.write('Oil Temperature Prediction Model trained')
-#             st.session_state['model_oil'] = model_oil
-#             st.session_state['oil_threshold'] = oil_threshold
-#             # Only for GA presentation
-#             st.session_state['X'] = X
-#             st.session_state['Y'] = Y
-#         else:
-#             st.write('Oil Temperature Prediction Model already trained')
-#             oil_threshold = st.session_state.get('oil_threshold', None)
-#             model_oil = st.session_state.get('model_oil', None)
-#             # Only for GA presentation
-#             X = st.session_state.get('X', None)
-#             Y = st.session_state.get('Y', None)
-#             ##train Oil temperature prediction model
-#         if ('OLMS_DATA' in st.session_state) and ('current_models' not in st.session_state):
-#             current_models = train_models_current(OLMS_DATA, st.session_state.OLMS_DATA_top_oil_mapping, horizon=6)
-#             st.write('Training Current Prediction Model...')
-#             model_oil, oil_threshold = prepare_model_top_oil(X, Y)
-#             st.write('Current Prediction Model trained')
-#             st.session_state['current_models'] = current_models
-#             # Only for GA presentation
-#             st.session_state['X'] = X
-#             st.session_state['Y'] = Y
-#         else:
-#             st.write('Current Prediction Model already trained')
-#             current_models = st.session_state.get('current_models', None)
-#         st.session_state.both_models_trained = True
-#
-#     elif 'X' in st.session_state and 'Y' in st.session_state:
-#         # If models are already trained, just use the existing X, Y data
-#         X = st.session_state.get('X', None)
-#         Y = st.session_state.get('Y', None)
-#         model_oil = st.session_state.get('model_oil', None)
-#         oil_threshold = st.session_state.get('oil_threshold', None)
-#         current_models = st.session_state.get('current_models', None)
-#     else:
-#         # If no model has been trained, show an error or a message
-#         st.write('Models not trained yet')
-#
-# with tabs[1]:
-#     st.header("Real Time Alarms")
-#     col1, col2, col3 = st.columns([20, 20, 20])
-#     if st.session_state.file_uploaded:
-#         with col1:
-#             if st.session_state.button2_pressed:
-#                 st.subheader("Bushings")
-#                 if 'OLMS_DATA' in st.session_state:
-#                     Alarms = compute_warning_on_bushing(pd.to_datetime('2024-08-01'), OLMS_DATA, st.session_state.Bushings_mapping)
-#                     st.markdown(display_light(Alarms.empty), unsafe_allow_html=True)
-#                     if not ((Alarms.loc['Status'] == 'Warning').any()):
-#                         st.write("No warnings on the Bushings. Bushing status ok")
-#                     else:
-#                         st.write("Warnings on the Bushings")
-#                     st.write("Bushings condition:")
-#                     st.write(Alarms)
-#         with col2:
-#             st.subheader("Dissolved Gas Analysis")
-#             if 'OLMS_DATA' in st.session_state and st.session_state.button3_pressed:
-#                 DGA = compute_warning_on_DGA(pd.to_datetime('2024-08-01'), OLMS_DATA, st.session_state.DGA_mapping)
-#                 st.markdown(display_light(not ((DGA['SCORE'] <= 3).any())), unsafe_allow_html=True)
-#                 if (DGA['SCORE'] <= 3).any():
-#                     DGA['SCORE'] = 'ok'
-#                     st.write("Status ok. No action suggested based on DGA data")
-#                 elif (3 < DGA['SCORE']).any() & (DGA['SCORE'] <= 5).any():
-#                     DGA['SCORE'] = 'minor warning'
-#                     st.write("Gas levels considerable but within limits. Increase monitoring")
-#                 elif (5 < DGA['SCORE']).any() & (DGA['SCORE'] <= 7).any():
-#                     DGA['SCORE'] = 'warning'
-#                     st.write("Gas levels considerable. Maintenance actions suggested")
-#                 else:
-#                     DGA['SCORE'] = 'critical'
-#                     st.write("Gas levels critical. Maintenance actions suggested")
-#                 st.write("DGA Results")
-#                 st.write(DGA)
-#         with col3:
-#             st.subheader("Oil Anomaly Detection")
-#             if 'model_oil' in st.session_state :
-#                 t = pd.to_datetime('2024-08-01')
-#                 Xtest = X[(X.index >= (t - pd.Timedelta(days=1))) & (X.index <= t)]
-#                 Ytest = Y[(Y.index >= (t - pd.Timedelta(days=1))) & (Y.index <= t)]
-#                 Flags, Error = predict_top_oil(Xtest, Ytest, model_oil, oil_threshold)
-#                 st.markdown(display_light(((Flags == True).any())), unsafe_allow_html=True)
-#                 if not ((Flags == True).any()):
-#                     st.write("No anomalies detected in oil temperature")
-#                 else:
-#                     st.write("Anomalies detected in oil temperature")
-#                 st.write('Model Output past 24 hours')
-#                 st.components.v1.html(html_error_plot(Error, oil_threshold), height=500)
-# with tabs[2]:
-#     if st.session_state.button1_pressed and st.session_state.button3_pressed and st.session_state.both_models_trained:
-#         st.subheader("Oil Temperature Prediction")
-#         if ('model_oil' in st.session_state) & ('current_models' in st.session_state):
-#             t = pd.to_datetime('2024-06-13 11:00:00')
-#             if st.session_state.temperature_oil_predicted is False:
-#                 st.session_state.OIL_temp, st.session_state.Probs = predict_oil_future(model_oil, current_models, OLMS_DATA, st.session_state.OLMS_DATA_top_oil_mapping, st.session_state.Loading_mapping, st.session_state.DGA_mapping, t)
-#                 st.session_state.temperature_oil_predicted = True
-#             st.write('Failure Probability due to oil Temperatures')
-#             st.write(st.session_state.Probs * 0)
-#             st.components.v1.html(html_future_oil_temp_plot(st.session_state.OIL_temp), height=600)
-#
-#
+
+
+
+
+
