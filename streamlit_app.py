@@ -301,7 +301,7 @@ def get_assets_of_user(user):
     return user_assets
 
 
-def train_anomaly_detection_model_start(asset,measurements_IDs):
+def update_anomaly_detection_model(asset,measurements_IDs):
     Data = read_data_from_DB(asset['AssetID'], engine)
     for meas_id in Data.MeasurementID.unique().tolist():
         Data.loc[Data.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
@@ -348,7 +348,7 @@ def train_anomaly_detection_model_start(asset,measurements_IDs):
 
 
 
-def train_q90_model_start(asset,measurements_IDs):
+def update_q90_model(asset,measurements_IDs):
     Data = read_data_from_DB(asset['AssetID'], engine)
     for meas_id in Data.MeasurementID.unique().tolist():
         Data.loc[Data.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
@@ -368,7 +368,7 @@ def train_q90_model_start(asset,measurements_IDs):
             json.dump(metadata, f, indent=4)
 
 
-def train_q50_model_start(asset,measurements_IDs):
+def update_q50_model(asset,measurements_IDs):
     Data = read_data_from_DB(asset['AssetID'], engine)
     for meas_id in Data.MeasurementID.unique().tolist():
         Data.loc[Data.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
@@ -387,21 +387,97 @@ def train_q50_model_start(asset,measurements_IDs):
         with open(f"models/oil_temp_forecast/{asset['AssetName']}_50_metadata.json", "w") as f:
             json.dump(metadata, f, indent=4)
 
+def calculate_DGA_flag(Data,measurements_IDs):
+    DGA_mapping = {'H2': "H2", 'CH4': "CH4", 'C2H2': "C2H2", 'C2H6': "C2H6", 'C2H4': "C2H4"}
+    dga_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in DGA_mapping.keys()]
+    Data_DGA = Data[Data["MeasurementID"].isin(dga_ids)]
+    if Data_DGA.shape[0]>=1:
+        for meas_id in dga_ids:
+            Data_DGA.loc[Data_DGA.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+        Data_DGA = Data_DGA.rename(columns={'MeasurementID': 'Measurement'})
+        Data_DGA.index = pd.DatetimeIndex(Data_DGA.Timestamp)
+        Data_DGA.drop(columns = ['Timestamp','AssetID'],inplace=True)
+        DGA_flag = compute_warning_on_DGA(Data_DGA)
+    else:
+        DGA_flag = pd.DataFrame()
+    return DGA_flag
 
-def retrain_stale_models(assets,measurements_IDs):
-    for id, asset in assets.iterrows():
-        if is_model_stale('models/top_oil_anomaly/'+asset.AssetName+'_metadata.json',days=7):
-            train_anomaly_detection_model_start(asset,measurements_IDs)
-        if is_model_stale('models/oil_temp_forecast/'+asset.AssetName+'_90_metadata.json',days=7):
-            train_q90_model_start(asset,measurements_IDs)
-        if is_model_stale('models/oil_temp_forecast/'+asset.AssetName+'_50_metadata.json',days=7):
-            train_q50_model_start(asset,measurements_IDs)
+def calculate_bushings_alers(Data,measurements_IDs):
+    Bushings_mapping = {'Capacitance HV1': 'Capacitance HV1', 'Capacitance HV2': 'Capacitance HV2',
+                                    'Capacitance HV3': 'Capacitance HV3','Capacitance LV1': 'Capacitance LV1',
+                                    'Capacitance LV2': 'Capacitance LV2', 'Capacitance LV3': 'Capacitance LV3',
+                                    'tand HV1': 'tand HV1', 'tand HV2': 'tand HV2', 'tand HV3': 'tand HV3',
+                                                 'tand LV1':  'tand LV1', 'tand LV2': 'tand LV2', 'tand LV3': 'tand LV3'}
+    Bushings_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in Bushings_mapping.keys()]
+    Data_Bushings = Data[Data["MeasurementID"].isin(Bushings_ids)]
+    for meas_id in Bushings_ids:
+        Data_Bushings.loc[Data_Bushings.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+    Data_Bushings = Data_Bushings.rename(columns={'MeasurementID': 'Measurement'})
+    # Pivot the data
+    Data_Bushings = Data_Bushings.pivot(index="Timestamp", columns="Measurement", values="Value")
+    Data_Bushings = Data_Bushings.sort_index().sort_index(axis=1)
+    Data_Bushings = Data_Bushings[(Data_Bushings != 0).all(axis=1)]
+    df = Data_Bushings.copy()
 
+    cap_cols = [col for col in df.columns if "Capacitance" in col]
+    cap_df = df[cap_cols].copy()
+
+
+    # Step 1: Calculate previous day's daily mean (used for comparison)
+    daily_mean = cap_df.resample("D").mean()
+
+    # Step 2: Resample into 2-hour means
+    resampled_4h = cap_df.resample("4H").mean()
+
+    # Step 3: Get previous day's mean for each 2-hour window
+    # Create a column with the date of the *previous* day
+    prev_day_index = resampled_4h.index - pd.Timedelta(days=1)
+    prev_day_means = daily_mean.reindex(prev_day_index.date)
+
+    # Because index mismatch on datetime vs. date, align it
+    prev_day_means.index = resampled_4h.index  # force same shape for element-wise math
+
+    # Step 4: Calculate percentage change
+    pct_change = (resampled_4h - prev_day_means) / prev_day_means * 100
+
+    # Step 5: Flag large deviations
+    alerts = (pct_change < -10) | (pct_change > 5)
+
+    # Optional: Get only the rows where any alert is triggered
+    alerted_changes = pct_change[alerts.any(axis=1)]
+    return alerted_changes
+
+def calculate_top_oil_alarms(Data,measurements_IDs):
+    oil_anomaly_detection_mapping = {'Top Oil Temperature': 'Top Oil Temperature', 'Ambient Temperature': 'Ambient Temperature',
+                                          'HV Current': 'HV Current'}
+    oil_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in oil_anomaly_detection_mapping.keys()]
+    Data_oil = Data[Data["MeasurementID"].isin(oil_ids)]
+    for meas_id in oil_ids:
+        Data_oil.loc[Data_oil.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
+    Data_oil = Data_oil.rename(columns={'MeasurementID': 'Measurement'})
+    Data_oil.index = pd.DatetimeIndex(Data_oil.Timestamp)
+    Data_oil = Data_oil.pivot(index="Timestamp", columns="Measurement", values="Value")
+    if Data_oil.shape[0]>=2:
+        Data_oil = Data_oil.resample('60min').mean()
+        model = keras.models.load_model('models/top_oil_anomaly/' + asset + '.h5', compile=False)
+        with open('models/top_oil_anomaly/'+asset+'_metadata.json', 'r') as f:
+            config = json.load(f)
+        threshold = config['threshold']
+        train_ids = Data_oil.index[Data_oil.rolling('60min').count().sum(axis=1) == Data_oil.shape[1]]
+        train_ids = train_ids[1:]
+        Y = Data_oil.loc[train_ids, 'Top Oil Temperature']
+        X = Data_oil.shift(1).loc[train_ids]
+        X= X.dropna(axis=0)
+        Y = Y.loc[X.index]
+        alarms_oil = predict_top_oil(X,Y,model, threshold)
+    else:
+        alarms_oil = pd.DataFrame()
+    return alarms_oil,threshold,Data_oil
 
 assets = get_assets_of_user(user)
 measurements_IDs = get_measurements_IDs(engine)
-retrain_stale_models(assets,measurements_IDs)
-print('a')
+
+
 st.set_page_config(layout='wide')
 if 'OLMS_DATA' not in st.session_state:
     st.session_state.OLMS_DATA = None
@@ -478,9 +554,10 @@ if tab == "Import Historical Logs":
         if st.button("Update Machine Learning Models", key="ML Update"):
             if st.session_state.asset is not None:
                 for id, asset in assets[assets.AssetName==st.session_state.asset].iterrows():
-                    train_anomaly_detection_model_start(asset,measurements_IDs)
-                    train_q50_model_start(asset,measurements_IDs)
-                    train_q90_model_start(asset,measurements_IDs)
+                    update_anomaly_detection_model(asset,measurements_IDs)
+                    update_q50_model(asset,measurements_IDs)
+                    update_q90_model(asset,measurements_IDs)
+
 if tab == "Historical Data Dashboard":
     timestamps = pd.date_range(start="2025-01-01", end="2025-01-10", freq="H")
     st.sidebar.header("Select Time Period")
@@ -498,70 +575,19 @@ if tab == "Historical Data Dashboard":
                                        assets.AssetName,
                                         key=f"select_asset", index=None  # Unique key for each selectbox
                                     )
-    print(assets[assets.AssetName==asset])
+
     for id, asset_i in assets[assets.AssetName==asset].iterrows():
         Data = read_data_from_DB(asset_i['AssetID'], engine)
         Data = Data[(Data.Timestamp>=start_dt)&(Data.Timestamp<=end_dt)]
         if Data.shape[0]>=1:
             ########################################################################
             ##Calculate DGA Scores##
-            DGA_mapping = {'H2': "H2", 'CH4': "CH4", 'C2H2': "C2H2", 'C2H6': "C2H6", 'C2H4': "C2H4"}
-            dga_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in DGA_mapping.keys()]
-            Data_DGA = Data[Data["MeasurementID"].isin(dga_ids)]
-            for meas_id in dga_ids:
-                Data_DGA.loc[Data_DGA.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
-            Data_DGA = Data_DGA.rename(columns={'MeasurementID': 'Measurement'})
-            Data_DGA.index = pd.DatetimeIndex(Data_DGA.Timestamp)
-            Data_DGA.drop(columns = ['Timestamp','AssetID'],inplace=True)
-            DGA_flag = compute_warning_on_DGA(Data_DGA)
+            DGA_flag = calculate_DGA_flag(Data,measurements_IDs)
             st.write("📉 DGA Scores:")
             st.dataframe(DGA_flag)
             ########################################################################
             ##Calculate Bushing Flags##
-            Bushings_mapping = {'Capacitance HV1': 'Capacitance HV1', 'Capacitance HV2': 'Capacitance HV2',
-                                    'Capacitance HV3': 'Capacitance HV3','Capacitance LV1': 'Capacitance LV1',
-                                    'Capacitance LV2': 'Capacitance LV2', 'Capacitance LV3': 'Capacitance LV3',
-                                    'tand HV1': 'tand HV1', 'tand HV2': 'tand HV2', 'tand HV3': 'tand HV3',
-                                                 'tand LV1':  'tand LV1', 'tand LV2': 'tand LV2', 'tand LV3': 'tand LV3'}
-            Bushings_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows()
-                            if meas['Name'] in Bushings_mapping.keys()]
-            Data_Bushings = Data[Data["MeasurementID"].isin(Bushings_ids)]
-            for meas_id in Bushings_ids:
-                Data_Bushings.loc[Data_Bushings.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
-            Data_Bushings = Data_Bushings.rename(columns={'MeasurementID': 'Measurement'})
-            # Pivot the data
-            Data_Bushings = Data_Bushings.pivot(index="Timestamp", columns="Measurement", values="Value")
-            Data_Bushings = Data_Bushings.sort_index().sort_index(axis=1)
-            Data_Bushings = Data_Bushings[(Data_Bushings != 0).all(axis=1)]
-            df = Data_Bushings.copy()
-
-            cap_cols = [col for col in df.columns if "Capacitance" in col]
-            cap_df = df[cap_cols].copy()
-
-
-            # Step 1: Calculate previous day's daily mean (used for comparison)
-            daily_mean = cap_df.resample("D").mean()
-
-            # Step 2: Resample into 2-hour means
-            resampled_4h = cap_df.resample("4H").mean()
-
-            # Step 3: Get previous day's mean for each 2-hour window
-            # Create a column with the date of the *previous* day
-            prev_day_index = resampled_4h.index - pd.Timedelta(days=1)
-            prev_day_means = daily_mean.reindex(prev_day_index.date)
-
-            # Because index mismatch on datetime vs. date, align it
-            prev_day_means.index = resampled_4h.index  # force same shape for element-wise math
-
-            # Step 4: Calculate percentage change
-            pct_change = (resampled_4h - prev_day_means) / prev_day_means * 100
-
-            # Step 5: Flag large deviations
-            alerts = (pct_change < -10) | (pct_change > 5)
-
-            # Optional: Get only the rows where any alert is triggered
-            alerted_changes = pct_change[alerts.any(axis=1)]
-
+            alerted_changes = calculate_bushings_alers(Data,measurements_IDs)
             # Display result
             st.write("🚨 Bushing Capacitance Alerts")
             st.dataframe(alerted_changes.style.format("{:.2f}%"))
@@ -607,18 +633,8 @@ if tab == "Real Time Data Dashboard":
         latest_ts = Data.Timestamp.max()
         Data = Data[(Data.Timestamp >= latest_ts - pd.Timedelta(hours=48)) & (Data.Timestamp <= latest_ts)]
         st.write(f"Real Time Dashboard: Latest data received at: {latest_ts}")
-        DGA_mapping = {'H2': "H2", 'CH4': "CH4", 'C2H2': "C2H2", 'C2H6': "C2H6", 'C2H4': "C2H4"}
-        dga_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in DGA_mapping.keys()]
-        Data_DGA = Data[Data["MeasurementID"].isin(dga_ids)]
-        if Data_DGA.shape[0]>=1:
-            for meas_id in dga_ids:
-                Data_DGA.loc[Data_DGA.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
-            Data_DGA = Data_DGA.rename(columns={'MeasurementID': 'Measurement'})
-            Data_DGA.index = pd.DatetimeIndex(Data_DGA.Timestamp)
-            Data_DGA.drop(columns = ['Timestamp','AssetID'],inplace=True)
-            DGA_flag = compute_warning_on_DGA(Data_DGA)
-        else:
-            DGA_flag = pd.DataFrame()
+        DGA_flag = calculate_DGA_flag(Data,measurements_IDs)
+
         Bushings_mapping = {'Capacitance HV1': 'Capacitance HV1', 'Capacitance HV2': 'Capacitance HV2',
                                         'Capacitance HV3': 'Capacitance HV3','Capacitance LV1': 'Capacitance LV1',
                                         'Capacitance LV2': 'Capacitance LV2', 'Capacitance LV3': 'Capacitance LV3',
@@ -631,66 +647,13 @@ if tab == "Real Time Data Dashboard":
             Data_Bushings.loc[Data_Bushings.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
         Data_Bushings = Data_Bushings.rename(columns={'MeasurementID': 'Measurement'})
         if Data_Bushings.shape[0]>=48:
-            # Pivot the data
-            Data_Bushings = Data_Bushings.pivot(index="Timestamp", columns="Measurement", values="Value")
-            Data_Bushings = Data_Bushings.sort_index().sort_index(axis=1)
-            Data_Bushings = Data_Bushings[(Data_Bushings != 0).all(axis=1)]
-            df = Data_Bushings.copy()
-
-            cap_cols = [col for col in df.columns if "Capacitance" in col]
-            cap_df = df[cap_cols].copy()
-
-
-            # Step 1: Calculate previous day's daily mean (used for comparison)
-            daily_mean = cap_df.resample("D").mean()
-
-            # Step 2: Resample into 2-hour means
-            resampled_4h = cap_df.resample("4H").mean()
-
-            # Step 3: Get previous day's mean for each 2-hour window
-            # Create a column with the date of the *previous* day
-            prev_day_index = resampled_4h.index - pd.Timedelta(days=1)
-            prev_day_means = daily_mean.reindex(prev_day_index.date)
-
-            # Because index mismatch on datetime vs. date, align it
-            prev_day_means.index = resampled_4h.index  # force same shape for element-wise math
-
-            # Step 4: Calculate percentage change
-            pct_change = (resampled_4h - prev_day_means) / prev_day_means * 100
-
-            # Step 5: Flag large deviations
-            alerts = (pct_change < -10) | (pct_change > 5)
-
-            # Optional: Get only the rows where any alert is triggered
-            Alarms_Bushings = pct_change[alerts.any(axis=1)]
+            Alarms_Bushings = calculate_bushings_alers(Data,measurements_IDs)
         else:
             Data_Bushings = pd.DataFrame()
         ########################################################################
         ########################################################################
-        oil_anomaly_detection_mapping = {'Top Oil Temperature': 'Top Oil Temperature', 'Ambient Temperature': 'Ambient Temperature',
-                                          'HV Current': 'HV Current'}
-        oil_ids = [meas['MeasurementID'] for id, meas in measurements_IDs.iterrows() if meas['Name'] in oil_anomaly_detection_mapping.keys()]
-        Data_oil = Data[Data["MeasurementID"].isin(oil_ids)]
-        for meas_id in oil_ids:
-            Data_oil.loc[Data_oil.MeasurementID==meas_id,'MeasurementID']=measurements_IDs.loc[measurements_IDs.MeasurementID==meas_id,'Name'].values[0]
-        Data_oil = Data_oil.rename(columns={'MeasurementID': 'Measurement'})
-        Data_oil.index = pd.DatetimeIndex(Data_oil.Timestamp)
-        Data_oil = Data_oil.pivot(index="Timestamp", columns="Measurement", values="Value")
-        if Data_oil.shape[0]>=2:
-            Data_oil = Data_oil.resample('60min').mean()
-            model = keras.models.load_model('models/top_oil_anomaly/' + asset + '.h5', compile=False)
-            with open('models/top_oil_anomaly/'+asset+'_metadata.json', 'r') as f:
-                config = json.load(f)
-            threshold = config['threshold']
-            train_ids = Data_oil.index[Data_oil.rolling('60min').count().sum(axis=1) == Data_oil.shape[1]]
-            train_ids = train_ids[1:]
-            Y = Data_oil.loc[train_ids, 'Top Oil Temperature']
-            X = Data_oil.shift(1).loc[train_ids]
-            X= X.dropna(axis=0)
-            Y = Y.loc[X.index]
-            alarms_oil = predict_top_oil(X,Y,model, threshold)
-        else:
-            alarms_oil = pd.DataFrame()
+        alarms_oil, threshold, Data_oil = calculate_top_oil_alarms(Data,measurements_IDs)
+
     tabs_real_time = st.tabs(['Alarms','Top Oil Forecast'])
     with tabs_real_time[0]:
         col1, col2, col3 = st.columns([20, 20, 20])
@@ -749,6 +712,7 @@ if tab == "Real Time Data Dashboard":
             predictions = pd.DataFrame(np.hstack((predictions_50.transpose(),predictions_90.transpose())),
                                        columns=['Q50','Q90'],index=[Data_oil.index.max()+timedelta(hours=i)
                                                                                                              for i in range(1,7)])
+            print('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
             threshold = st.slider('Select Top Oil Temperature Limit', min_value=50.0, max_value=90.0, value=60.0, step=1.0)
             st.components.v1.html(html_future_oil_temp_plot(predictions,threshold), height=600, width=1200, scrolling=True)
             print(predictions)
