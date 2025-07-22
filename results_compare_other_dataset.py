@@ -1,0 +1,498 @@
+import os
+import logging
+import datetime
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+import tensorflow as tf
+tf.get_logger().setLevel(logging.ERROR)
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore", category=FutureWarning)
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib
+import tf_keras
+from sklearn.metrics import r2_score, mean_absolute_percentage_error, mean_squared_error
+from tf_keras import layers
+matplotlib.use('Agg')
+from scipy.stats import pearsonr
+
+import random
+np.random.seed(10)
+tf.random.set_seed(10)
+random.seed(10)
+
+def build_regression_model(input_shape):
+    model = tf_keras.Sequential([
+        layers.InputLayer(input_shape=input_shape),
+        layers.Dense(32, activation='relu'),
+        layers.Dense(32, activation='relu'),
+        layers.Dense(1),
+    ])
+    return model
+
+def loss_mse(y_true, y_pred):
+    e = y_true - y_pred
+    return tf.reduce_mean(e * e)
+
+def train_model_top_oil(X_train, y_train):
+    maxX = maxV[X_train.columns]
+    # Instantiate the model
+    input_shape = (X_train.shape[1],)  # Assuming X_train is your feature matrix
+    model = build_regression_model(input_shape)
+    # Compile the model
+    model.compile(optimizer='adam', loss=loss_mse)
+    # Train the model
+    history = model.fit(X_train / maxX, y_train / maxX['Top Oil Temperature'], epochs=50, verbose=0)
+    # model.save('Models/Top_Oil')
+    return model
+
+def prepare_model_top_oil(X, Y):
+    # Specify the directory path
+    model = train_model_top_oil(X, Y)
+    maxX = maxV[X.columns]
+    ypred = model.predict(X / maxX.values) * maxX['Top Oil Temperature']
+    mean_error = (Y - ypred.reshape(ypred.shape[0])).mean()
+    std_error = (Y - ypred.reshape(ypred.shape[0])).std()
+    UCL = mean_error + 3 * std_error
+    LCL = mean_error - 3 * std_error
+    return model, UCL, LCL, mean_error, std_error
+
+def compute_hydrogen_condition_state(h2_value):
+    if -0.01 <= h2_value <= 20.00:
+        return 0
+    elif 20.00 < h2_value <= 40.00:
+        return 2
+    elif 40.00 < h2_value <= 100.00:
+        return 4
+    elif 100.00 < h2_value <= 200.00:
+        return 10
+    elif 200.00 < h2_value <= 10000.00:
+        return 16
+    else:
+        return 0  # Handle cases outside of the specified ranges, if needed
+
+def compute_methane_condition_state(ch4_value):
+    if -0.01 <= ch4_value <= 10.00:
+        return 0
+    elif 10.00 < ch4_value <= 20.00:
+        return 2
+    elif 20.00 < ch4_value <= 50.00:
+        return 4
+    elif 50.00 < ch4_value <= 150.00:
+        return 10
+    elif 150.00 < ch4_value <= 10000.00:
+        return 16
+    else:
+        return None  # Handle cases outside the specified ranges, if needed
+
+def compute_ethylene_condition_state(c2h4_value):
+    if -0.01 <= c2h4_value <= 10.00:
+        return 0
+    elif 10.00 < c2h4_value <= 20.00:
+        return 2
+    elif 20.00 < c2h4_value <= 50.00:
+        return 4
+    elif 50.00 < c2h4_value <= 150.00:
+        return 10
+    elif 150.00 < c2h4_value <= 10000.00:
+        return 16
+    else:
+        return 0  # Handle cases outside the specified ranges, if needed
+
+def compute_ethane_condition_state(c2h6_value):
+    if -0.01 <= c2h6_value <= 10.00:
+        return 0
+    elif 10.00 < c2h6_value <= 20.00:
+        return 2
+    elif 20.00 < c2h6_value <= 50.00:
+        return 4
+    elif 50.00 < c2h6_value <= 150.00:
+        return 10
+    elif 150.00 < c2h6_value <= 10000.00:
+        return 16
+    else:
+        return 0  # Handle cases outside the specified ranges, if needed
+
+def compute_acetylene_condition_state(c2h2_value):
+    if -0.01 <= c2h2_value <= 1.00:
+        return 0
+    elif 1.00 < c2h2_value <= 5.00:
+        return 2
+    elif 5.00 < c2h2_value <= 20.00:
+        return 4
+    elif 20.00 < c2h2_value <= 100.00:
+        return 8
+    elif 100.00 < c2h2_value <= 10000.00:
+        return 10
+    else:
+        return 0
+
+def compute_normal_scenarios(DGA):
+    DGA['C2H2_State'] = DGA['C2H2'].apply(compute_acetylene_condition_state)
+    DGA['C2H6_State'] = DGA['C2H6'].apply(compute_ethane_condition_state)
+    DGA['C2H4_State'] = DGA['C2H4'].apply(compute_ethylene_condition_state)
+    SCORE = 30 * (DGA['C2H4_State'] + DGA['C2H6_State']) + 120 * DGA[
+        'C2H2_State']
+    condition = (SCORE / 120) <= 3
+
+    # Return the Series with the index as DatetimeIndex and the boolean values
+    ids = pd.Series(condition, index=DGA.index)
+
+    return ids
+
+def prepare_DGA_df(DATA, OLMS_mapping):
+    DGA = pd.DataFrame(columns=['C2H2', 'C2H6', 'C2H4'])
+    for col in DGA.columns:
+        DGA[col] = DATA.loc[DATA.Measurement == OLMS_mapping[col], 'Value'].resample('30min').mean()
+
+    return DGA
+
+def prepare_Bushing_df(DATA, Bushings_mapping):
+    Bushings = pd.DataFrame(columns=['Cap H1', 'Cap H2', 'Cap H3', 'Cap Y1', 'Cap Y2', 'Cap Y3',
+                                     'tand H1', 'tand H2', 'tand H3', 'tand Y1', 'tand Y2', 'tand Y3'])
+    for col in Bushings.columns:
+        Bushings[col] = DATA.loc[DATA.Measurement == Bushings_mapping[col], 'Value'].resample('30min').mean()
+    return Bushings
+
+def prepare_top_oil_relevant_data(DATA):
+    OIL = DATA[['Top-oil', 'Air temp sun', 'Current HV']].resample('30min').mean()
+    OIL.rename(columns={
+        'Top-oil': 'Top Oil Temperature',
+        'Air temp sun': 'Ambient Temperature',
+        'Current HV': 'HV Current'
+    }, inplace=True)
+    return OIL
+
+def data_cleaning_for_top_oil_train(DATA):
+    OIL = prepare_top_oil_relevant_data(DATA)
+    maxT= 10 * np.ceil(OIL['Ambient Temperature'].max()/ 10)
+    minT= 10 * np.floor(OIL['Ambient Temperature'].min()/ 10)
+    maxI= 5 * np.ceil(OIL['HV Current'].max()/ 5)
+    minI= 5 * np.floor(OIL['HV Current'].min()/ 5)
+    current_bins = np.arange(minI, maxI + 5, 5)
+    temperature_bins = np.arange(minT, maxT + 10, 10)
+    OIL, mask = quantile_90_bins(OIL, current_bins, temperature_bins)
+    OIL.dropna(inplace=True)
+    mask = mask.loc[OIL.index]
+    return OIL, mask
+
+def generate_training_data_oil(DATA):
+    OIL, mask = data_cleaning_for_top_oil_train(DATA)
+
+    # Raw X and Y (without using mask)
+    train_ids = OIL.index[OIL.rolling('30min').count().sum(axis=1) == OIL.shape[1]]
+    train_ids = train_ids[1:]
+    delta = pd.Timedelta('30min')
+    valid_timestamps = OIL.index.intersection(OIL.index + delta)
+    Y_raw = OIL.loc[valid_timestamps, 'Top Oil Temperature']
+    X_raw = OIL.loc[valid_timestamps - delta]
+    X_raw.index = Y_raw.index
+
+    # Filtered X and Y using the mask
+    Y_filtered = Y_raw[mask.loc[Y_raw.index]]
+    X_filtered = X_raw[mask.loc[X_raw.index]]
+
+    return X_raw, Y_raw, X_filtered, Y_filtered
+
+def anomaly_detection_in_oil_temp(y_pred, y_true, UCL, LCL, window):
+    MRi = y_true - y_pred #ta MR metaxi ton ypred, ytrue tou test (both healthy and abnormal)
+    MR = MRi.diff().abs().dropna()
+    # MRmean = MR.mean()
+    # MRstd = MR.std()
+    # UCL = MRmean + 3*MRstd
+    # LCL = MRmean - 3*MRstd
+    Flags = ((MR >= UCL).rolling(window=window).mean() >= 0.75) | ((MR <= LCL).rolling(window=window).mean() >= 0.75)
+
+    consecutive_above_ucl = 0
+    consecutive_below_lcl = 0
+    anomalies = pd.DataFrame(columns=["Start Timestamp", "Message"])
+
+    for i in range(window, len(MR)):
+        # Check if the deviation is above UCL or below LCL
+        if MR.iloc[i] > UCL:
+            consecutive_above_ucl += 1
+            consecutive_below_lcl = 0  # Reset below LCL counter
+        elif MR.iloc[i] < LCL:
+            consecutive_below_lcl += 1
+            consecutive_above_ucl = 0  # Reset above UCL counter
+        else:
+            consecutive_above_ucl = 0
+            consecutive_below_lcl = 0
+
+        if consecutive_above_ucl >= 2 or consecutive_below_lcl >= 2:
+            if i > 0 and (MR.index[i] - MR.index[i - 1]).total_seconds() > 1800:
+                # If the gap is more than 30 minutes, reset the counters and skip
+                consecutive_above_ucl = 0
+                consecutive_below_lcl = 0
+                continue
+
+        # If there are "window" consecutive intervals above UCL or below LCL, flag it as an anomaly
+        if consecutive_above_ucl >= window or consecutive_below_lcl >= window:
+            anomaly_start_timestamp = MR.index[i - window +1]  # The timestamp of the first anomaly in the range
+            anomaly_end_timestamp = MR.index[i]  # The timestamp of the last anomaly in the range
+            message = f"Anomaly detected from {anomaly_start_timestamp} to {anomaly_end_timestamp}"
+            new_row = pd.DataFrame([[anomaly_start_timestamp, message]], columns=["Start Timestamp", "Message"])
+            anomalies = pd.concat([anomalies, new_row])
+
+    if not anomalies.empty:
+        anomalies["Start Timestamp"] = anomalies["Start Timestamp"].dt.date
+        anomalies.set_index("Start Timestamp", inplace=True)
+
+    return anomalies, MR, Flags
+
+def compute_warning_on_bushing(t, DATA, Bushings_mapping):
+    Bushings = pd.DataFrame(columns=['Cap H1', 'Cap H2', 'Cap H3', 'Cap Y1', 'Cap Y2', 'Cap Y3',
+                                     'tand H1', 'tand H2', 'tand H3', 'tand Y1', 'tand Y2', 'tand Y3'])
+    for col in Bushings.columns:
+        Bushings[col] = DATA.loc[DATA.Measurement == Bushings_mapping[col], 'Value'].resample('30min').mean()
+
+    Bushings_last = Bushings[(Bushings.index >= (t - pd.Timedelta(days=7))) & (Bushings.index <= t)]
+    value = Bushings_last[-6:].mean()
+    mean = Bushings_last[:-6].mean()
+    abs_change = 100 * (mean - value).abs() / mean
+    warning = abs_change >= 10
+    Message = pd.DataFrame(columns=warning.index)
+    Message.loc[0, Message.columns[warning]] = 'Warning'
+    Message.loc[0, Message.columns[warning == False]] = 'OK'
+    Message.index = ['Status']
+    return Message
+
+def compute_warning_on_DGA(t, DATA, DGA_mapping):
+    DGA = prepare_DGA_df(DATA, DGA_mapping)
+    DGA_last = DGA[(DGA.index >= (t - pd.Timedelta(days=1))) & (DGA.index <= t)].copy()
+    DGA_last['C2H2_State'] = DGA_last['C2H2'].apply(compute_acetylene_condition_state)
+    DGA_last['C2H6_State'] = DGA_last['C2H6'].apply(compute_ethane_condition_state)
+    DGA_last['C2H4_State'] = DGA_last['C2H4'].apply(compute_ethylene_condition_state)
+    DGA_last = DGA_last.mean()
+    DGA_last['SCORE'] = 30 * (DGA_last['C2H4_State'] + DGA_last['C2H6_State']) + 120 * DGA_last['C2H2_State']
+    DGA_last.drop(index=['C2H2_State', 'C2H6_State', 'C2H4_State'], inplace=True)
+    DGA = pd.DataFrame(index=['status'], columns=DGA_last.index)
+    DGA.loc['status', :] = DGA_last.values.transpose()
+    return DGA
+
+def data_find_abnormal_DGA(DATA, DGA_mapping):
+    DGA = prepare_DGA_df(DATA, DGA_mapping).dropna()
+    ids = compute_normal_scenarios(DGA)
+    ids_not_normal = ids[ids == False].index
+
+    return ids_not_normal
+
+def plot_anomalies(anomalies, MR, MRmean, UCL, LCL, output_dir="bushing_plots_ABB"):
+    os.makedirs(output_dir, exist_ok=True)
+    print("Saving to directory:", os.path.abspath(output_dir))
+    for idx, anomaly in anomalies.iterrows():
+        anomaly_start_timestamp = idx
+        anomaly_date = anomaly_start_timestamp
+        single_day_data = MR.loc[str(anomaly_date)]
+        plt.figure(figsize=(10, 6))
+        plt.plot(single_day_data.index, single_day_data, label="MR Values", color='blue', alpha=0.7, marker='o')
+        plt.axhline(MRmean, color='green', linestyle='--', label="Mean of MR (Mean)")
+        plt.axhline(UCL, color='red', linestyle='--', label="UCL (Upper Control Limit)")
+        plt.axhline(LCL, color='orange', linestyle='--', label="LCL (Lower Control Limit)")
+        plt.fill_between(single_day_data.index, LCL, UCL, color='gray', alpha=0.2, label="Control Band")
+        plt.title(f'Mean, UCL, LCL, and MR Values for {anomaly_date}', fontsize=16)
+        plt.xlabel('Timestamp', fontsize=14)
+        plt.ylabel('MR Value (°C) ', fontsize=14)
+        plt.legend(loc='upper left', fontsize=12)
+        plt.grid(True)
+        plt.xticks(fontsize=12)
+        plt.yticks(fontsize=12)
+        plt.tight_layout()
+        plot_filename = f"{output_dir}/{anomaly_date}_anomaly.png"
+        plt.savefig(plot_filename)
+        plt.close()
+
+    single_day_data = MR
+    plt.figure(figsize=(10, 6))
+    plt.plot(single_day_data.index, single_day_data, label="MR Values", color='blue', alpha=0.7, marker='o')
+    plt.axhline(MRmean, color='green', linestyle='--', label="Mean of MR (Mean)")
+    plt.axhline(UCL, color='red', linestyle='--', label="UCL (Upper Control Limit)")
+    plt.axhline(LCL, color='orange', linestyle='--', label="LCL (Lower Control Limit)")
+    plt.fill_between(single_day_data.index, LCL, UCL, color='gray', alpha=0.2, label="Control Band")
+    plt.title(f'Mean, UCL, LCL, and MR Values for testing data', fontsize=16)
+    plt.xlabel('Timestamp', fontsize=14)
+    plt.ylabel('MR Value (°C) ', fontsize=14)
+    plt.legend(loc='upper left', fontsize=12)
+    plt.grid(True)
+    plt.xticks(fontsize=12)
+    plt.yticks(fontsize=12)
+    plt.tight_layout()
+    plot_filename = f"{output_dir}/anomaly.png"
+    plt.savefig(plot_filename)
+    plt.close()
+
+def plot_DGA(alarms, output_dir="bushing_plots_ABB"):
+    title = "DGA C2H2, C2H6, C2H4 values and score"
+    os.makedirs(output_dir, exist_ok=True)
+    plt.figure(figsize=(12, 6))
+    for column in alarms.columns:
+        plt.plot(alarms.index, alarms[column], label=column)
+
+    plt.title(title)
+    plt.xlabel("Index")
+    plt.ylabel("Values")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plot_filename = f"{output_dir}/DGA.png"
+    plt.savefig(plot_filename)
+    plt.close()
+
+def quantile_90_bins(OIL, current_bins, temperature_bins):
+    mask = pd.Series(False, index=OIL.index)
+
+    for i in range(len(current_bins) - 1):
+        for j in range(len(temperature_bins) - 1):
+            bin_data = OIL[
+                (OIL['HV Current'] >= current_bins[i]) &
+                (OIL['HV Current'] < current_bins[i + 1]) &
+                (OIL['Ambient Temperature'] >= temperature_bins[j]) &
+                (OIL['Ambient Temperature'] < temperature_bins[j + 1])
+                ]
+
+            if not bin_data.empty:  # If bin_data has any rows
+                Temp_quantile_005 = bin_data['Top Oil Temperature'].quantile(0.05)
+                Temp_quantile_095 = bin_data['Top Oil Temperature'].quantile(0.95)
+
+                # Filter the bin_data to keep values within quantiles
+                bin_data_filtered = bin_data[
+                    (bin_data['Top Oil Temperature'] >= Temp_quantile_005) &
+                    (bin_data['Top Oil Temperature'] <= Temp_quantile_095)
+                    ]
+
+                # Mark the rows in mask as True if they are part of the valid filtered data
+                mask.loc[bin_data_filtered.index] = True
+
+    return OIL, mask
+
+def plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ABB"):
+    os.makedirs(output_dir, exist_ok=True)
+    print("Saving to directory:", os.path.abspath(output_dir))
+    for date in anomalies.index:
+        bushing_day_measurements = Bushing.loc[Bushing.index.date == date]
+        if not bushing_day_measurements.empty:
+            # Define plot groups
+            cap_y_cols = [col for col in bushing_day_measurements.columns if "Cap" in col and "Y" in col]
+            cap_h_cols = [col for col in bushing_day_measurements.columns if "Cap" in col and "H" in col]
+            tand_cols = [col for col in bushing_day_measurements.columns if "tand" in col]
+
+            # Plot Cap Y
+            plt.figure(figsize=(10, 4))
+            for col in cap_y_cols:
+                plt.plot(bushing_day_measurements.index, bushing_day_measurements[col], label=col)
+            plt.title(f'Capacitance Y Bushings for {date}')
+            plt.xlabel('Time')
+            plt.ylabel('Capacitance in pF')
+            plt.legend()
+            plt.grid(True)
+            plt.tight_layout()
+            filename = os.path.join(output_dir, f'{date}_Cap_Y.png')
+            plt.savefig(filename)
+            plt.close()
+
+            # Plot Cap H
+            plt.figure(figsize=(10, 4))
+            for col in cap_h_cols:
+                plt.plot(bushing_day_measurements.index, bushing_day_measurements[col], label=col)
+            plt.title(f'Capacitance H Bushings for {date}')
+            plt.xlabel('Time')
+            plt.ylabel('Capacitance in pF')
+            plt.legend()
+            plt.grid(True)
+            plt.tight_layout()
+            filename = os.path.join(output_dir, f'{date}_Cap_H.png')
+            plt.savefig(filename)
+            plt.close()
+
+            # Plot Tan Delta
+            plt.figure(figsize=(10, 4))
+            for col in tand_cols:
+                plt.plot(bushing_day_measurements.index, bushing_day_measurements[col], label=col)
+            plt.title(f'Tan Delta Bushings for {date}')
+            plt.xlabel('Time')
+            plt.ylabel('Value')
+            plt.legend()
+            plt.grid(True)
+            plt.tight_layout()
+            filename = os.path.join(output_dir, f'{date}_TanD.png')
+            plt.savefig(filename)
+            plt.close()
+
+#main
+#read data
+ABB = pd.read_csv('oct-april.csv', low_memory=False)
+ABB['timestamp'] = pd.to_datetime(ABB['timestamp'], unit='s', utc=True)
+ABB['timestamp'] = ABB['timestamp'] + pd.Timedelta(hours=3)
+ABB=ABB.sort_values(by=['timestamp', 'Id'])
+ABB.index = ABB['timestamp']
+ABB.drop(columns=['Source.Name'], inplace=True)
+ABB.rename(columns={'Id': 'Meas_ID', 'timestamp': 'Timestamp'}, inplace=True)
+
+
+#mappings
+OLMS_DATA_top_oil_mapping = {'Top Oil Temperature': 'Top-oil',
+                             'Ambient Temperature': 'Air temp sun',
+                             'Ambient Shade Temperature': 'Air temp',
+                             'HV Current': 'Current HV'}
+
+X, Y, X_filtered, Y_filtered = generate_training_data_oil(ABB)
+
+cutoff_date = '31/03/2019'
+X = X[X.index <= cutoff_date]
+Y = Y[Y.index <= cutoff_date]
+X_filtered = X_filtered[X_filtered.index <= cutoff_date]
+Y_filtered = Y_filtered[Y_filtered.index <= cutoff_date]
+
+split_date = '28/01/2019'
+X_train = X_filtered[X_filtered.index<split_date]
+Y_train = Y_filtered[X_train.index]
+X_test = X[X.index>=split_date]
+Y_test = Y[X_test.index]
+
+plt.figure(figsize=(14, 6))
+for column in X.columns:
+    plt.plot(X.index, X[column], label=column)
+plt.xlabel('Date')
+plt.ylabel('Value')
+plt.title('X Dataset - Time Series of All Features')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+
+output_dir="bushing_plots_ABB"
+os.makedirs(output_dir, exist_ok=True)
+filename = f"{output_dir}/x_values.png"
+plt.savefig(filename)
+
+#prepare_model_top_oil
+maxV = {'Top Oil Temperature': 70, 'Ambient Temperature': 50, 'Ambient Shade Temperature': 50, 'HV Current': 300}
+maxV = pd.Series(maxV)
+model, UCL, LCL, mean_error, std_error = prepare_model_top_oil(X_train, Y_train)
+maxX = maxV[X_test.columns]
+ypred = model.predict(X_test / maxX.values) * maxX['Top Oil Temperature']
+ypred = ypred.flatten()
+ypred = pd.Series(ypred, index=Y_test.index)
+
+#show evaluation metrics
+Y_test_for_evaluation=Y_filtered[Y_filtered.index >= split_date]
+X_test_for_evaluation=X_filtered[X_filtered.index >= split_date]
+ypred_eval = model.predict(X_test_for_evaluation / maxX.values) * maxX['Top Oil Temperature']
+ypred_eval = ypred_eval.flatten()
+ypred_eval = pd.Series(ypred_eval, index=Y_test_for_evaluation.index)
+print('threshold:', UCL)
+print('MSE:', mean_squared_error(Y_test_for_evaluation, ypred_eval))
+print('MAPE:', mean_absolute_percentage_error(Y_test_for_evaluation, ypred_eval))
+print('R2:', r2_score(Y_test_for_evaluation, ypred_eval))
+
+pearson_corr, _ = pearsonr(Y_test_for_evaluation, ypred_eval)
+print('Pearson r:', pearson_corr)
+print('R2 from Pearson (r^2):', pearson_corr**2)
+
+#find anomalies with the model
+window = 3
+anomalies, MR, Flags = anomaly_detection_in_oil_temp(ypred, Y_test, UCL, LCL, window)
+plot_anomalies(anomalies, MR, mean_error, UCL, LCL)
+
+print('a')

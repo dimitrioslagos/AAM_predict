@@ -14,7 +14,7 @@ import matplotlib
 import tf_keras
 from sklearn.metrics import r2_score, mean_absolute_percentage_error, mean_squared_error
 from tf_keras import layers
-matplotlib.use('TkAgg')
+matplotlib.use('Agg')
 from scipy.stats import pearsonr
 
 def build_regression_model(input_shape):
@@ -49,8 +49,9 @@ def prepare_model_top_oil(X, Y):
     ypred = model.predict(X / maxX.values) * maxX['Top Oil Temperature']
     mean_error = (Y - ypred.reshape(ypred.shape[0])).mean()
     std_error = (Y - ypred.reshape(ypred.shape[0])).std()
-    threshold = mean_error + 3 * std_error
-    return model, threshold
+    UCL = mean_error + 3 * std_error
+    LCL = mean_error - 3 * std_error
+    return model, UCL, LCL, mean_error, std_error
 
 def compute_hydrogen_condition_state(h2_value):
     if -0.01 <= h2_value <= 20.00:
@@ -188,15 +189,14 @@ def generate_training_data_oil(DATA, OLMS_DATA_top_oil_mapping):
 
     return X_raw, Y_raw, X_filtered, Y_filtered
 
-def anomaly_detection_in_oil_temp(y_pred, y_true, threshold, window):
-    MRi = y_true - y_pred
+def anomaly_detection_in_oil_temp(y_pred, y_true, UCL, LCL, window):
+    MRi = y_true - y_pred #ta MR metaxi ton ypred, ytrue tou test (both healthy and abnormal)
     MR = MRi.diff().abs().dropna()
-    MRmean = MR.mean()
-    MRstd = MR.std()
-    UCL = MRmean + 3*MRstd
-    LCL = MRmean - 3*MRstd
-    Flags = (MR >= threshold).rolling(window=window).mean() >= 0.75
-
+    # MRmean = MR.mean()
+    # MRstd = MR.std()
+    # UCL = MRmean + 3*MRstd
+    # LCL = MRmean - 3*MRstd
+    Flags = ((MR >= UCL).rolling(window=window).mean() >= 0.75) | ((MR <= LCL).rolling(window=window).mean() >= 0.75)
 
     consecutive_above_ucl = 0
     consecutive_below_lcl = 0
@@ -233,7 +233,34 @@ def anomaly_detection_in_oil_temp(y_pred, y_true, threshold, window):
         anomalies["Start Timestamp"] = anomalies["Start Timestamp"].dt.date
         anomalies.set_index("Start Timestamp", inplace=True)
 
-    return anomalies, MR, MRmean, UCL, LCL, Flags
+    return anomalies, MR, Flags
+
+
+# def daily_oil_temp_warning_flag(y_pred, y_true, window_recent=48, window_baseline=48 * 7,
+#                                 threshold_percent=10):
+#     df = pd.DataFrame({'true': y_true, 'pred': y_pred})
+#     df['error'] = df['true'] - df['pred']
+#     anomalies = []
+#
+#     for i in range(window_recent + window_baseline, len(df)):
+#         recent_idx = df.index[i - window_recent:i]
+#         baseline_idx = df.index[i - window_recent - window_baseline:i - window_recent]
+#
+#         recent_mean = df.loc[recent_idx, 'error'].mean()
+#         baseline_mean = df.loc[baseline_idx, 'error'].mean()
+#
+#         if pd.isna(recent_mean) or pd.isna(baseline_mean):
+#             continue
+#
+#         relative_change = 100 * abs(recent_mean - baseline_mean) / (abs(baseline_mean) + 1e-6)
+#
+#         if relative_change >= threshold_percent:
+#             anomalies.append((df.index[i], relative_change))
+#
+#     anomalies_df = pd.DataFrame(anomalies, columns=['Timestamp', 'Relative Change (%)'])
+#     anomalies_df.set_index('Timestamp', inplace=True)
+#
+#     return anomalies_df
 
 def compute_warning_on_bushing(t, DATA, Bushings_mapping):
     Bushings = pd.DataFrame(columns=['Cap H1', 'Cap H2', 'Cap H3', 'Cap Y1', 'Cap Y2', 'Cap Y3',
@@ -277,6 +304,7 @@ def data_find_abnormal_DGA(DATA, DGA_mapping):
 
 def plot_anomalies(anomalies, MR, MRmean, UCL, LCL, output_dir="bushing_plots_ATF8"):
     os.makedirs(output_dir, exist_ok=True)
+    print("Saving to directory:", os.path.abspath(output_dir))
     for idx, anomaly in anomalies.iterrows():
         anomaly_start_timestamp = idx
         anomaly_date = anomaly_start_timestamp
@@ -295,7 +323,7 @@ def plot_anomalies(anomalies, MR, MRmean, UCL, LCL, output_dir="bushing_plots_AT
         plt.xticks(fontsize=12)
         plt.yticks(fontsize=12)
         plt.tight_layout()
-        plot_filename = f"{output_dir}/anomaly_{anomaly_date}.png"
+        plot_filename = f"{output_dir}/{anomaly_date}_anomaly.png"
         plt.savefig(plot_filename)
         plt.close()
 
@@ -314,7 +342,7 @@ def plot_anomalies(anomalies, MR, MRmean, UCL, LCL, output_dir="bushing_plots_AT
     plt.xticks(fontsize=12)
     plt.yticks(fontsize=12)
     plt.tight_layout()
-    plot_filename = f"{output_dir}/anomaly.png"
+    plot_filename = f"{output_dir}/all_MR_values.png"
     plt.savefig(plot_filename)
     plt.close()
 
@@ -364,6 +392,7 @@ def quantile_90_bins(OIL, current_bins, temperature_bins):
 
 def plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF8"):
     os.makedirs(output_dir, exist_ok=True)
+    print("Saving to directory:", os.path.abspath(output_dir))
     for date in anomalies.index:
         bushing_day_measurements = Bushing.loc[Bushing.index.date == date]
         if not bushing_day_measurements.empty:
@@ -382,7 +411,7 @@ def plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF8")
             plt.legend()
             plt.grid(True)
             plt.tight_layout()
-            filename = os.path.join(output_dir, f'Cap_Y_{date}.png')
+            filename = os.path.join(output_dir, f'{date}_Cap_Y.png')
             plt.savefig(filename)
             plt.close()
 
@@ -396,7 +425,7 @@ def plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF8")
             plt.legend()
             plt.grid(True)
             plt.tight_layout()
-            filename = os.path.join(output_dir, f'Cap_H_{date}.png')
+            filename = os.path.join(output_dir, f'{date}_Cap_H.png')
             plt.savefig(filename)
             plt.close()
 
@@ -410,7 +439,7 @@ def plot_anomalies_bushings(anomalies, Bushing, output_dir="bushing_plots_ATF8")
             plt.legend()
             plt.grid(True)
             plt.tight_layout()
-            filename = os.path.join(output_dir, f'TanD_{date}.png')
+            filename = os.path.join(output_dir, f'{date}_TanD.png')
             plt.savefig(filename)
             plt.close()
 
@@ -426,8 +455,13 @@ ATF8.index = T
 ATF8.drop(ATF8.index[ATF8.Logs=='SENSOR ERROR 1'], inplace=True)
 ATF8.drop(columns=['Logs'], inplace=True)
 
+#ATF8.to_csv('ATF8.csv')
+
 #mappings
-OLMS_DATA_top_oil_mapping = {'Top Oil Temperature': 'Top Oil Temp', 'Ambient Temperature': 'Ampient Sun', 'Ambient Shade Temperature': 'Ampient Shade', 'HV Current': 'HV Load Current'}
+OLMS_DATA_top_oil_mapping = {'Top Oil Temperature': 'Top Oil Temp',
+                             'Ambient Temperature': 'Ampient Sun',
+                             'Ambient Shade Temperature': 'Ampient Shade',
+                             'HV Current': 'HV Load Current'}
 
 DGA_mapping = {'H2': "TM8 0 H2inOil", 'CH4': "TM8 0 CH4inOil", 'C2H2': "TM8 0 C2H2inOil", 'C2H6': "TM8 0 C2H6inOil", 'C2H4': "TM8 0 C2H4inOil"}
 
@@ -447,19 +481,19 @@ Y_train=Y_filtered[X_filtered.index.month<8]
 #prepare_model_top_oil
 maxV = {'Top Oil Temperature': 70, 'Ambient Temperature': 50, 'Ambient Shade Temperature': 50, 'HV Current': 300}
 maxV = pd.Series(maxV)
-model, threshold = prepare_model_top_oil(X_train, Y_train)
+model, UCL, LCL, mean_error, std_error = prepare_model_top_oil(X_train, Y_train) #this UCL, LCL threshold is calculated on the train set, healthy state
 maxX = maxV[X_test.columns]
-ypred = model.predict(X_test / maxX.values) * maxX['Top Oil Temperature']
+ypred = model.predict(X_test / maxX.values) * maxX['Top Oil Temperature'] #this prediction is based on test (both healthy and unhealthy)
 ypred = ypred.flatten()
 ypred = pd.Series(ypred, index=Y_test.index)
 
 #show evaluation metrics
-Y_test_for_evaluation=Y_filtered[X_filtered.index.month>=8]
-X_test_for_evaluation=X_filtered[X_filtered.index.month>=8]
+Y_test_for_evaluation=Y_filtered[X_filtered.index.month>=8]#from the test  but healthy states
+X_test_for_evaluation=X_filtered[X_filtered.index.month>=8]#from the test  but healthy states
 ypred_eval = model.predict(X_test_for_evaluation / maxX.values) * maxX['Top Oil Temperature']
 ypred_eval = ypred_eval.flatten()
 ypred_eval = pd.Series(ypred_eval, index=Y_test_for_evaluation.index)
-print('threshold:', threshold)
+print('UCL:', UCL)
 print('MSE:', mean_squared_error(Y_test_for_evaluation, ypred_eval))
 print('MAPE:', mean_absolute_percentage_error(Y_test_for_evaluation, ypred_eval))
 print('R2:', r2_score(Y_test_for_evaluation, ypred_eval))
@@ -470,8 +504,14 @@ print('R2 from Pearson (r^2):', pearson_corr**2)
 
 #find anomalies with the model
 window = 3
-anomalies, MR, MRmean, UCL, LCL, Flags = anomaly_detection_in_oil_temp(ypred, Y_test, threshold, window)
-plot_anomalies(anomalies, MR, MRmean, UCL, LCL)
+anomalies, MR, Flags = anomaly_detection_in_oil_temp(ypred, Y_test, UCL, LCL, window)
+# new_data = pd.DataFrame({
+#     'Message': ['', '','']
+# }, index=pd.to_datetime(['2024-08-16', '2024-08-17', '2024-08-18']))
+# new_data.index = new_data.index.date
+# anomalies = pd.concat([anomalies, new_data])
+#anomalies_new = daily_oil_temp_warning_flag(ypred, Y_test, window_recent=48, window_baseline=48 * 7, threshold_percent=10)
+plot_anomalies(anomalies, MR, mean_error, UCL, LCL)
 
 #find ids marked abnormal by DGA
 ids = data_find_abnormal_DGA(ATF8, DGA_mapping)
